@@ -20,6 +20,8 @@ export type Resolved = {
   entries: DictEntry[];
   /** Слово похоже на имя собственное (заглавная не в начале предложения) и не найдено. */
   maybeProperNoun: boolean;
+  /** Выделена фраза, которой нет в словаре: entries — перевод опорного слова, headword — вся фраза. */
+  phraseFallback?: boolean;
 };
 
 const CONTRACTIONS: Record<string, string> = {
@@ -87,23 +89,67 @@ async function entryIdsByLemma(db: SQLiteDatabase, lemma: string): Promise<numbe
 }
 
 /** Выделенная фраза: ищем целиком (фразовые глаголы, устойчивые сочетания), иначе — первое значимое слово. */
+const STOP_WORDS = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'on', 'at', 'and', 'or', 'is', 'are', 'was', 'were', 'be', 'it', 'he', 'she', 'they', 'we', 'i', 'you', 'his', 'her', 'their', 'my', 'your', 'its']);
+
+/** Варианты фразы с леммами каждого слова: «grew up» → «grow up», «looked after him» → «look after him»… (не больше 40). */
+export function phraseVariants(words: string[]): string[] {
+  const perWord = words.map((w) => {
+    const form = normalizeWord(w);
+    const forms = new Set<string>([form]);
+    for (const l of lemmaCandidates(form)) forms.add(l);
+    // Неправильные формы частых глаголов, которых правила суффиксов не знают.
+    const irregular: Record<string, string> = {
+      grew: 'grow', went: 'go', gave: 'give', took: 'take', came: 'come', got: 'get', ran: 'run', made: 'make',
+      put: 'put', set: 'set', broke: 'break', brought: 'bring', caught: 'catch', fell: 'fall', found: 'find', held: 'hold',
+      kept: 'keep', knew: 'know', left: 'leave', let: 'let', lost: 'lose', met: 'meet', paid: 'pay', said: 'say',
+      sat: 'sit', stood: 'stand', told: 'tell', thought: 'think', threw: 'throw', turned: 'turn', woke: 'wake', wore: 'wear',
+      drew: 'draw', ate: 'eat', fed: 'feed', felt: 'feel', flew: 'fly', forgot: 'forget', hung: 'hang', hid: 'hide',
+      laid: 'lay', led: 'lead', lit: 'light', rose: 'rise', sang: 'sing', sank: 'sink', shot: 'shoot', spoke: 'speak',
+      spent: 'spend', struck: 'strike', swept: 'sweep', swung: 'swing', tore: 'tear', wrote: 'write', been: 'be', was: 'be',
+      were: 'be', is: 'be', are: 'be', am: 'be', has: 'have', had: 'have', does: 'do', did: 'do', done: 'do', gone: 'go',
+    };
+    if (irregular[form]) forms.add(irregular[form]);
+    return [...forms];
+  });
+  const out: string[] = [];
+  const walk = (i: number, acc: string[]) => {
+    if (out.length >= 40) return;
+    if (i === perWord.length) { out.push(acc.join(' ')); return; }
+    for (const f of perWord[i]) walk(i + 1, [...acc, f]);
+  };
+  walk(0, []);
+  return [...new Set(out)];
+}
+
 export async function resolvePhrase(db: SQLiteDatabase, raw: string): Promise<Resolved> {
-  const words = raw.replace(/\s+/g, ' ').trim().split(' ');
+  const words = raw.replace(/\s+/g, ' ').trim().split(' ').filter((w) => normalizeWord(w));
   if (words.length <= 1) return resolveWord(db, raw);
-  const phrase = words.map(normalizeWord).filter(Boolean).join(' ');
+  const phrase = words.map(normalizeWord).join(' ');
   const ids: number[] = [];
-  const hit = await db.getFirstAsync<{ entry_id: number }>('SELECT entry_id FROM dict_phrasals WHERE phrase = ?', phrase);
-  if (hit) ids.push(hit.entry_id);
-  for (const e of await entryIdsByLemma(db, phrase)) if (!ids.includes(e)) ids.push(e);
+  let headword = phrase;
+  for (const variant of phraseVariants(words)) {
+    const hit = await db.getFirstAsync<{ entry_id: number }>('SELECT entry_id FROM dict_phrasals WHERE phrase = ?', variant);
+    if (hit && !ids.includes(hit.entry_id)) { ids.push(hit.entry_id); if (headword === phrase) headword = variant; }
+    for (const e of await entryIdsByLemma(db, variant)) if (!ids.includes(e)) { ids.push(e); if (headword === phrase) headword = variant; }
+    if (ids.length >= 3) break;
+  }
+  // Внутри длинного выделения может прятаться фразовый глагол из двух слов: «decided to give up» → «give up».
+  if (ids.length === 0 && words.length > 2) {
+    for (let i = 0; i < words.length - 1 && ids.length === 0; i++) {
+      for (const variant of phraseVariants([words[i], words[i + 1]])) {
+        const hit = await db.getFirstAsync<{ entry_id: number }>('SELECT entry_id FROM dict_phrasals WHERE phrase = ?', variant);
+        if (hit) { ids.push(hit.entry_id); headword = variant; break; }
+      }
+    }
+  }
   if (ids.length > 0) {
     const entries = await loadEntries(db, ids);
-    return { form: raw, normalized: phrase, headword: phrase, entries, maybeProperNoun: false };
+    return { form: raw, normalized: phrase, headword, entries, maybeProperNoun: false };
   }
-  // Фразы нет в словаре — переводим первое слово, которое не служебное, с учётом соседа.
-  const STOP = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'on', 'at', 'and', 'or', 'is', 'are', 'was', 'were', 'be', 'it', 'he', 'she', 'they', 'we', 'i', 'you']);
-  const idx = Math.max(0, words.findIndex((w) => !STOP.has(normalizeWord(w))));
+  // Фразы нет в словаре: показываем опорное слово, но примеры и Reverso — по всей фразе.
+  const idx = Math.max(0, words.findIndex((w) => !STOP_WORDS.has(normalizeWord(w))));
   const first = await resolveWord(db, words[idx], { prev: words[idx - 1], next: words[idx + 1] });
-  return { ...first, form: raw, headword: first.entries.length ? first.headword : phrase };
+  return { ...first, form: raw, normalized: phrase, headword: phrase, phraseFallback: true };
 }
 
 export async function resolveWord(

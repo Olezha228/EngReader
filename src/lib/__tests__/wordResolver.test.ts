@@ -45,3 +45,10 @@ describe('lemmaCandidates', () => {
     expect(c.every((w) => w.length >= 2)).toBe(true);
   });
 });
+
+describe('phraseVariants', () => {
+  const { phraseVariants } = require('../wordResolver') as typeof import('../wordResolver');
+  test('grew up → grow up', () => expect(phraseVariants(['grew', 'up'])).toContain('grow up'));
+  test('looked after → look after', () => expect(phraseVariants(['looked', 'after'])).toContain('look after'));
+  test('не больше 40 вариантов', () => expect(phraseVariants(['running', 'tried', 'boxes', 'families']).length).toBeLessThanOrEqual(40));
+});

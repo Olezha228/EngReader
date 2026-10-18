@@ -20,9 +20,12 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
   const [loadingExamples, setLoadingExamples] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
-  const entry = word?.entries[0] ?? null;
+  // Для фразы без словарной статьи заголовок и запись в словарь — сама фраза, а не опорное слово.
+  const phraseFallback = !!word?.phraseFallback;
+  const entry = phraseFallback ? null : (word?.entries[0] ?? null);
   const lemma = entry?.lemma ?? word?.headword ?? '';
   const pos = entry?.pos ?? '';
+  const supportEntry = phraseFallback ? (word?.entries[0] ?? null) : null;
 
   useEffect(() => {
     setExamples(null);
@@ -78,7 +81,17 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
           </View>
           {word.normalized !== lemma ? <Text style={styles.form}>словоформа: {word.normalized}</Text> : null}
 
-          {word.entries.length === 0 ? (
+          {phraseFallback ? (
+            <View style={styles.entry}>
+              <Text style={styles.missing}>Такой фразы в словаре нет — смотрите «Примеры» и Reverso по всей фразе.</Text>
+              {supportEntry ? (
+                <>
+                  <Text style={styles.entryHead}>{supportEntry.lemma} <Text style={styles.pos}>{supportEntry.pos}</Text>{supportEntry.ipa ? <Text style={styles.ipa}> /{supportEntry.ipa}/</Text> : null}</Text>
+                  {supportEntry.senses.slice(0, 4).map((s, i) => <Text key={i} style={styles.sense}>{i + 1}. {s}</Text>)}
+                </>
+              ) : null}
+            </View>
+          ) : word.entries.length === 0 ? (
             <Text style={styles.missing}>
               {word.maybeProperNoun ? 'Похоже на имя собственное' : 'Нет в словаре'} — можно сохранить без перевода и посмотреть примеры
             </Text>
