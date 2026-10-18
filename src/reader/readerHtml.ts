@@ -57,10 +57,17 @@ export const readerHtml = `<!DOCTYPE html>
   var knownRe = null;
 
   function escRe(s) { return s.replace(/[.*+?^$\\{\\}()|\\[\\]\\\\]/g, '\\\\$&'); }
+  var PARTICLES = { out: 1, off: 1, up: 1, down: 1, in: 1, on: 1, away: 1, back: 1, over: 1, apart: 1, aside: 1, along: 1, around: 1, through: 1 };
   function setKnownList(list) {
     list = (list || []).filter(function (w) { return w && /^[A-Za-z][A-Za-z'\\u2019-]*( [A-Za-z'\\u2019-]+){0,3}$/.test(w); }).slice(0, 3000);
     list.sort(function (a, b) { return b.length - a.length; }); // фразы раньше одиночных слов
-    knownRe = list.length ? new RegExp('\\\\b(' + list.map(escRe).join('|') + ')\\\\b', 'gi') : null;
+    var parts = list.map(function (w) {
+      var ws = w.split(' ');
+      // Разделяемый фразовый глагол: «take out» должен подсветить и «took a watch out» (до 3 слов между).
+      if (ws.length === 2 && PARTICLES[ws[1]]) return escRe(ws[0]) + "(?:\\\\s+[A-Za-z'\\u2019-]+){0,3}\\\\s+" + escRe(ws[1]);
+      return escRe(w);
+    });
+    knownRe = parts.length ? new RegExp('\\\\b(' + parts.join('|') + ')\\\\b', 'gi') : null;
   }
   // Подчёркиваем слова из словаря: оборачиваем совпадения в <mark>, не трогая разметку.
   function highlightKnown(doc) {
@@ -250,6 +257,17 @@ export const readerHtml = `<!DOCTYPE html>
         var W = window.innerWidth || document.documentElement.clientWidth;
         if (sx < W * 0.1) { rendition.prev(); return; }
         if (sx > W * 0.9) { rendition.next(); return; }
+        // Диагностика «красного текста»: цвет под пальцем и у тела главы, элемент и его классы.
+        try {
+          var el = doc.elementFromPoint(t.clientX, t.clientY);
+          var chain = [], cur = el, n = 0;
+          while (cur && cur.nodeType === 1 && n++ < 4) {
+            var cs = doc.defaultView.getComputedStyle(cur);
+            chain.push(cur.tagName + (cur.className ? '.' + String(cur.className).replace(/\\s+/g, '.') : '') + '[' + cs.color + (cs.webkitTextFillColor && cs.webkitTextFillColor !== cs.color ? ' fill=' + cs.webkitTextFillColor : '') + ']');
+            cur = cur.parentElement;
+          }
+          post({ type: 'debug', msg: 'colors: body=' + doc.defaultView.getComputedStyle(doc.body).color + ' | ' + chain.join(' < ') + ' | sel=' + (doc.getSelection() && doc.getSelection().toString().slice(0, 20)) });
+        } catch (e) {}
         // Двойной тап — слово; одиночный (после паузы) — панель прогресса и оглавления.
         var now = Date.now();
         if (lastTap && now - lastTap.t < 320 && Math.abs(t.clientX - lastTap.x) < 40 && Math.abs(t.clientY - lastTap.y) < 40) {
