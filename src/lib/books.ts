@@ -54,8 +54,23 @@ export async function pickAndImportBook(db: SQLiteDatabase): Promise<number | nu
   });
   if (result.canceled) return null;
   const asset = result.assets[0];
-  if (!/\.epub$/i.test(asset.name)) throw new Error('Это не EPUB: выберите файл с расширением .epub');
-  return importBookFromUri(db, asset.uri, asset.name);
+  // iOS может отдать имя без расширения и без mimeType — проверяем содержимое: EPUB это zip (сигнатура PK\x03\x04).
+  const looksEpub = /\.epub$/i.test(asset.name) || /\.epub$/i.test(asset.uri) || asset.mimeType === 'application/epub+zip';
+  if (!looksEpub && !(await isZipFile(asset.uri))) {
+    throw new Error(`Это не EPUB: «${asset.name}»${asset.mimeType ? ` (${asset.mimeType})` : ''}. Нужен файл .epub без DRM.`);
+  }
+  const name = /\.epub$/i.test(asset.name) ? asset.name : `${asset.name.replace(/\.[^.]+$/, '') || 'book'}.epub`;
+  return importBookFromUri(db, asset.uri, name);
+}
+
+/** Первые байты файла: zip начинается с «PK\x03\x04», в base64 это «UEsDBA». */
+async function isZipFile(uri: string): Promise<boolean> {
+  try {
+    const b64 = await new File(uri).base64();
+    return b64.startsWith('UEsDBA');
+  } catch {
+    return false;
+  }
 }
 
 export async function importBookFromUri(
