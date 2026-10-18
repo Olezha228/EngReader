@@ -30,6 +30,13 @@ export const readerHtml = `<!DOCTYPE html>
   var post = function (m) {
     if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(m));
   };
+  window.onerror = function (msg, src, line, col) {
+    post({ type: 'error', message: String(msg) + ' @' + line + ':' + col });
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    post({ type: 'error', message: 'unhandled: ' + String(e.reason && (e.reason.message || e.reason)) });
+  });
+  post({ type: 'debug', msg: 'libs: JSZip=' + typeof JSZip + ' ePub=' + typeof ePub + ' vw=' + window.innerWidth + 'x' + window.innerHeight });
   var book = null, rendition = null;
   var WORD_CHAR = /[A-Za-z\\u00C0-\\u024F'\\u2019-]/;
   var THEMES = {
@@ -171,10 +178,27 @@ export const readerHtml = `<!DOCTYPE html>
     });
   }
 
+  // Диагностика касаний: куда они приходят — во внешнюю страницу или в iframe главы.
+  var touchDiag = 0;
+  document.addEventListener('touchstart', function (e) {
+    if (touchDiag++ < 3) post({ type: 'debug', msg: 'outer touchstart target=' + (e.target && e.target.tagName) + ' at ' + Math.round(e.touches[0].clientX) + ',' + Math.round(e.touches[0].clientY) });
+  }, { passive: true, capture: true });
+  document.addEventListener('pointerdown', function (e) {
+    if (touchDiag++ < 6) post({ type: 'debug', msg: 'outer pointerdown target=' + (e.target && e.target.tagName) });
+  }, { passive: true, capture: true });
+
   // Вешаем жесты на документ каждой главы (iframe epub.js).
   function attach(contents) {
     var doc = contents.document;
     var start = null;
+    post({ type: 'debug', msg: 'attach hook: doc=' + (doc && doc.readyState) + ' sameDoc=' + (document.querySelector('iframe') && document.querySelector('iframe').contentDocument === doc) });
+    ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'click'].forEach(function (ev) {
+      doc.addEventListener(ev, function (e) { if (touchDiag++ < 12) post({ type: 'debug', msg: 'iframe ' + ev + ' target=' + (e.target && e.target.tagName) }); }, { passive: true, capture: true });
+    });
+    try {
+      var ifr = document.querySelector('iframe');
+      post({ type: 'debug', msg: 'iframe attrs: sandbox=' + ifr.getAttribute('sandbox') + ' pe=' + getComputedStyle(ifr).pointerEvents + ' z=' + getComputedStyle(ifr).zIndex + ' topEl=' + (document.elementFromPoint(200, 300) && document.elementFromPoint(200, 300).tagName) });
+    } catch (e) {}
     highlightKnown(doc);
     watchSelection(contents);
     doc.addEventListener('touchstart', function (e) {
@@ -207,7 +231,9 @@ export const readerHtml = `<!DOCTYPE html>
     try {
       book = ePub();
       book.open(b64, 'base64');
-      rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'none' });
+      // allowScriptedContent: без allow-scripts в sandbox iframe WebKit не вызывает обработчики событий
+      // внутри главы — тапы и свайпы по тексту просто не доходят.
+      rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'none', allowScriptedContent: true });
       var fs = (settings && settings.fontSize) || 100;
       rendition.themes.default(Object.assign({ body: { 'padding': '0 10px !important' } }, KNOWN_STYLE));
       Object.keys(THEMES).forEach(function (name) {
@@ -220,6 +246,28 @@ export const readerHtml = `<!DOCTYPE html>
       rendition.on('relocated', function (loc) {
         post({ type: 'relocated', cfi: loc.start.cfi, percent: loc.start.percentage || 0 });
       });
+      rendition.on('rendered', function (section, view) {
+        var v = document.getElementById('viewer');
+        var info = 'rendered ' + (section && section.href) + ' viewer=' + v.clientWidth + 'x' + v.clientHeight + ' iframes=' + document.querySelectorAll('iframe').length;
+        try {
+          var f = document.querySelector('iframe');
+          var r = f.getBoundingClientRect();
+          var cs = getComputedStyle(f);
+          var wrap = f.parentElement; var wr = wrap.getBoundingClientRect();
+          var doc = f.contentDocument;
+          var body = doc && doc.body;
+          var bcs = body && doc.defaultView.getComputedStyle(body);
+          info += ' | iframe rect=' + Math.round(r.x) + ',' + Math.round(r.y) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)
+            + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' disp=' + cs.display
+            + ' | wrap=' + Math.round(wr.x) + ',' + Math.round(wr.y) + ' ' + Math.round(wr.width) + 'x' + Math.round(wr.height) + ' wrapVis=' + getComputedStyle(wrap).visibility
+            + ' | body text=' + (body ? (body.innerText || '').trim().length : -1) + ' color=' + (bcs && bcs.color) + ' bg=' + (bcs && bcs.backgroundColor)
+            + ' bodyW=' + (body && body.scrollWidth) + ' cols=' + (bcs && bcs.columnWidth) + ' | container scrollLeft=' + (v.firstElementChild && v.firstElementChild.scrollLeft);
+        } catch (e) { info += ' | diag error: ' + e; }
+        post({ type: 'debug', msg: info });
+      });
+      rendition.on('displayError', function (e) { post({ type: 'error', message: 'displayError: ' + String(e) }); });
+      book.opened.then(function () { post({ type: 'debug', msg: 'opened, spine=' + (book.spine && book.spine.length) }); })
+        .catch(function (e) { post({ type: 'error', message: 'open failed: ' + String(e) }); });
       book.ready
         .then(function () {
           // Книга с DRM: в архиве лежит META-INF/encryption.xml — текст зашифрован, читать нечего.
@@ -235,7 +283,9 @@ export const readerHtml = `<!DOCTYPE html>
           post({ type: 'ready', title: (meta && meta.title) || '', author: (meta && meta.creator) || '' });
         })
         .catch(function (e) { if (String(e).indexOf('drm') < 0) post({ type: 'error', message: String(e) }); });
-      rendition.display(cfi || undefined).catch(function (e) { post({ type: 'error', message: String(e) }); });
+      rendition.display(cfi || undefined)
+        .then(function () { post({ type: 'debug', msg: 'displayed' }); })
+        .catch(function (e) { post({ type: 'error', message: 'display: ' + String(e) }); });
     } catch (e) {
       post({ type: 'error', message: String(e) });
     }

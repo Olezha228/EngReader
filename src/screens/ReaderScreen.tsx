@@ -22,6 +22,7 @@ type Msg =
   | { type: 'word'; word: string; sentence: string; prev: string; next: string; cfi: string; selection?: boolean }
   | { type: 'too_long'; words: number }
   | { type: 'miss' }
+  | { type: 'debug'; msg: string }
   | { type: 'error'; message: string; code?: string };
 
 type Props = { book: Book; onBack: () => void };
@@ -54,6 +55,7 @@ export function ReaderScreen({ book, onBack }: Props) {
       setFontSize(state.font_size);
       setTheme(state.theme);
       const settings = { fontSize: state.font_size, theme: state.theme, known };
+      console.log('[reader] openBook', book.title, 'base64 chars:', b64.length, 'cfi:', state.cfi);
       inject(`window.__openBook(${JSON.stringify(b64)}, ${JSON.stringify(state.cfi)}, ${JSON.stringify(settings)})`);
     } catch (e) {
       setStatus('error');
@@ -64,9 +66,12 @@ export function ReaderScreen({ book, onBack }: Props) {
   const onMessage = useCallback(async (event: WebViewMessageEvent) => {
     let msg: Msg;
     try { msg = JSON.parse(event.nativeEvent.data) as Msg; } catch { return; }
+    if (msg.type !== 'relocated') console.log('[reader]', msg.type, 'msg' in msg ? msg.msg : 'message' in msg ? msg.message : '');
     switch (msg.type) {
       case 'loaded':
         void openBook();
+        break;
+      case 'debug':
         break;
       case 'ready':
         setStatus('ready');
@@ -137,7 +142,11 @@ export function ReaderScreen({ book, onBack }: Props) {
         <Pressable onPress={() => changeFont(-10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A−</Text></Pressable>
         <Pressable onPress={() => changeFont(10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A+</Text></Pressable>
       </View>
-      <View style={styles.webWrap}>
+      <View
+        style={styles.webWrap}
+        onTouchStart={(e) => console.log('[reader] rn touchstart', Math.round(e.nativeEvent.locationX), Math.round(e.nativeEvent.locationY))}
+        onTouchEnd={(e) => console.log('[reader] rn touchend', Math.round(e.nativeEvent.locationX), Math.round(e.nativeEvent.locationY))}
+      >
         <WebView
           ref={webRef}
           source={{ html: readerHtml }}
@@ -148,9 +157,13 @@ export function ReaderScreen({ book, onBack }: Props) {
           allowingReadAccessToURL="/"
           scrollEnabled={false}
           bounces={false}
-          onShouldStartLoadWithRequest={(req: { url: string }) =>
-            req.url === 'about:blank' || req.url.startsWith('blob:') || req.url.startsWith('data:')
-          }
+          onShouldStartLoadWithRequest={(req: { url: string }) => {
+            const ok = req.url.startsWith('about:') || req.url.startsWith('blob:') || req.url.startsWith('data:') || req.url.startsWith('file:');
+            if (!ok) console.log('[reader] blocked navigation', req.url);
+            return ok;
+          }}
+          onError={(e) => { console.log('[reader] webview error', e.nativeEvent.description); setStatus('error'); }}
+          onContentProcessDidTerminate={() => { console.log('[reader] webview process terminated'); Alert.alert('Читалка перезапущена', 'iOS выгрузил страницу из памяти. Откройте книгу ещё раз.'); }}
           style={[styles.web, { backgroundColor: THEME_BG[theme] }]}
         />
         {status === 'loading' ? (
@@ -160,8 +173,10 @@ export function ReaderScreen({ book, onBack }: Props) {
         ) : null}
       </View>
       <View style={styles.footer}>
+        <Pressable onPress={() => inject('window.__prev()')} hitSlop={10} style={styles.navBtn}><Text style={[styles.navText, fg]}>‹</Text></Pressable>
         <Text style={styles.progress}>{Math.round(percent * 100)} %</Text>
-        <Text style={styles.hint}>тап по слову — перевод · края и свайп — листать</Text>
+        <Text style={styles.hint}>тап по слову — перевод · свайп — листать</Text>
+        <Pressable onPress={() => inject('window.__next()')} hitSlop={10} style={styles.navBtn}><Text style={[styles.navText, fg]}>›</Text></Pressable>
       </View>
       <WordSheet word={tapped} onClose={() => setTapped(null)} onChanged={() => void refreshKnown()} />
     </SafeAreaView>
@@ -178,7 +193,9 @@ const styles = StyleSheet.create({
   web: { flex: 1, backgroundColor: '#fff' },
   overlay: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', gap: 12 },
   overlayText: { color: '#666' },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 6 },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 4, gap: 10 },
+  navBtn: { paddingHorizontal: 10, paddingVertical: 2 },
+  navText: { fontSize: 26, fontWeight: '600', lineHeight: 30 },
   progress: { color: '#666', fontSize: 12 },
   hint: { color: '#999', fontSize: 11 },
 });
