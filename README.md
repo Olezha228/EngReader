@@ -8,7 +8,7 @@
 
 ## Стек
 
-- Expo SDK 58 / React Native 0.88 / TypeScript (ADR-001).
+- Expo SDK 57 / React Native 0.86 / TypeScript (ADR-001). SDK 57, а не 58, потому что Expo Go из App Store пока поддерживает только 57; поднять до 58 после выхода нового Expo Go.
 - Читалка — epub.js в `react-native-webview`, JS-мост отдаёт слово, предложение и CFI (ADR-002).
 - Словарь EN→RU — SQLite в приложении (`expo-sqlite`); сейчас посевной на ~90 слов,
   полный из Wiktionary — задача T-2.1 (ADR-003).
