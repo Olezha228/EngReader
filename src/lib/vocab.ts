@@ -66,12 +66,41 @@ export async function addToVocab(
   return result;
 }
 
-/** Слова и формы, которые подчёркиваются в тексте книги как известные. */
+const SUFFIX_VARIANTS = (w: string): string[] => {
+  const out = [w, `${w}s`, `${w}es`, `${w}ed`, `${w}d`, `${w}ing`];
+  if (w.endsWith('e')) out.push(`${w.slice(0, -1)}ing`);
+  if (w.endsWith('y')) out.push(`${w.slice(0, -1)}ies`, `${w.slice(0, -1)}ied`);
+  return out;
+};
+
+/**
+ * Слова и фразы словаря во всех формах — для подсветки в тексте книги (US-2.2).
+ * Формы берутся из словарной базы (take → took, taken, takes, taking) плюс регулярные суффиксы;
+ * у фразы склоняется первое слово: «take off» → «took off», «taking off». Длинные — первыми.
+ */
 export async function knownWords(db: SQLiteDatabase): Promise<string[]> {
-  const rows = await db.getAllAsync<{ w: string }>(
-    'SELECT lemma AS w FROM vocab UNION SELECT DISTINCT form AS w FROM vocab_contexts',
-  );
-  return rows.map((r) => r.w).filter((w) => w.length > 1);
+  const rows = await db.getAllAsync<{ lemma: string }>('SELECT lemma FROM vocab');
+  const ctxForms = await db.getAllAsync<{ form: string }>('SELECT DISTINCT form FROM vocab_contexts');
+  const out = new Set<string>();
+  const add = (s: string) => { const v = s.trim().toLowerCase(); if (v.length > 1) out.add(v); };
+  for (const { form } of ctxForms) add(form);
+  for (const { lemma } of rows) {
+    const words = lemma.toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    const head = words[0];
+    const tail = words.slice(1).join(' ');
+    let forms: string[] = [];
+    try {
+      const fr = await db.getAllAsync<{ form: string }>(
+        'SELECT f.form FROM dict_forms f JOIN dict_entries e ON e.id = f.entry_id WHERE e.lemma = ?', head,
+      );
+      forms = fr.map((r) => r.form);
+    } catch { /* словарь может быть не подключён */ }
+    const heads = new Set<string>([head, ...forms, ...SUFFIX_VARIANTS(head)]);
+    for (const h of heads) add(tail ? `${h} ${tail}` : h);
+    if (out.size > 3000) break;
+  }
+  return [...out].sort((a, b) => b.length - a.length);
 }
 
 /** Перевод, заданный пользователем (для фраз и слов, которых нет в словаре). */

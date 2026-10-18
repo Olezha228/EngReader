@@ -47,12 +47,19 @@ export const readerHtml = `<!DOCTYPE html>
     sepia: { body: { background: '#f4ecd8', color: '#5b4636' } },
     dark:  { body: { background: '#121212', color: '#d6d6d6' } }
   };
-  var KNOWN_STYLE = { 'mark.er-known': { background: 'transparent', color: 'inherit', 'border-bottom': '2px solid rgba(47,111,237,0.55)' } };
+  // Выученные слова — жёлтый фон; ссылки книги не меняют цвет при касании (иначе сноски вспыхивают красным).
+  var KNOWN_STYLE = {
+    'mark.er-known': { background: 'rgba(255, 214, 0, 0.45)', color: 'inherit', 'border-radius': '3px', padding: '0 1px', 'box-decoration-break': 'clone', '-webkit-box-decoration-break': 'clone' },
+    'a, a:link, a:visited, a:active, a:hover, a:focus': { color: 'inherit !important', 'text-decoration': 'none !important', outline: 'none !important' },
+    '*': { '-webkit-tap-highlight-color': 'transparent' },
+    '::selection': { background: 'rgba(47, 111, 237, 0.28)' }
+  };
   var knownRe = null;
 
   function escRe(s) { return s.replace(/[.*+?^$\\{\\}()|\\[\\]\\\\]/g, '\\\\$&'); }
   function setKnownList(list) {
-    list = (list || []).filter(function (w) { return w && /^[A-Za-z][A-Za-z'\\u2019-]*( [A-Za-z'\\u2019-]+)?$/.test(w); }).slice(0, 3000);
+    list = (list || []).filter(function (w) { return w && /^[A-Za-z][A-Za-z'\\u2019-]*( [A-Za-z'\\u2019-]+){0,3}$/.test(w); }).slice(0, 3000);
+    list.sort(function (a, b) { return b.length - a.length; }); // фразы раньше одиночных слов
     knownRe = list.length ? new RegExp('\\\\b(' + list.map(escRe).join('|') + ')\\\\b', 'gi') : null;
   }
   // Подчёркиваем слова из словаря: оборачиваем совпадения в <mark>, не трогая разметку.
