@@ -163,12 +163,18 @@ export const readerHtml = `<!DOCTYPE html>
       selTimer = setTimeout(function () {
         var sel = doc.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) { lastSelection = ''; return; }
-        var text = sel.toString().replace(/\\s+/g, ' ').trim();
+        var range = sel.getRangeAt(0);
+        // Ручки выделения часто останавливаются посреди слова — раздвигаем до границ слов.
+        try {
+          var sc = range.startContainer, ec = range.endContainer;
+          if (sc.nodeType === 3) range.setStart(sc, expandWord(sc.textContent || '', range.startOffset).start);
+          if (ec.nodeType === 3) range.setEnd(ec, expandWord(ec.textContent || '', Math.max(0, range.endOffset - 1)).end);
+        } catch (e) {}
+        var text = range.toString().replace(/\\s+/g, ' ').trim();
         if (!text || text === lastSelection) return;
         lastSelection = text;
         var words = text.split(' ').filter(Boolean);
         if (words.length > 5) { post({ type: 'too_long', words: words.length }); return; }
-        var range = sel.getRangeAt(0);
         var cfi = '';
         try { cfi = contents.cfiFromRange(range); } catch (e) {}
         var node = range.startContainer.nodeType === 3 ? range.startContainer : range.startContainer.firstChild || range.startContainer;
