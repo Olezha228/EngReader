@@ -1,5 +1,6 @@
 // Личный словарь: добавление без дублей (lemma+pos), контексты, список.
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { ensureCard } from './srs';
 import type { DictEntry } from './wordResolver';
 
 export type VocabItem = {
@@ -46,11 +47,13 @@ export async function addToVocab(
       id = res.lastInsertRowId;
       isNew = true;
     }
-    await db.runAsync(
+    const ctx = await db.runAsync(
       `INSERT INTO vocab_contexts (vocab_id, form, sentence, book_id, cfi, source, created_at)
        VALUES (?, ?, ?, ?, ?, 'book', ?)`,
       id, args.form, args.sentence, args.bookId, args.cfi, Date.now(),
     );
+    // Карточка повторения — одна на слово, привязана к первому контексту.
+    await ensureCard(db, id, ctx.lastInsertRowId);
     result = { id, isNew, seenCount };
   });
   return result;

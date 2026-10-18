@@ -6,11 +6,12 @@ import { StatusBar } from 'expo-status-bar';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { migrate } from './src/db/schema';
 import type { Book } from './src/lib/books';
+import { CardsScreen } from './src/screens/CardsScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
 import { ReaderScreen } from './src/screens/ReaderScreen';
 import { VocabScreen } from './src/screens/VocabScreen';
 
-type Route = { name: 'library' } | { name: 'reader'; book: Book } | { name: 'vocab' };
+type Route = { name: 'library' } | { name: 'reader'; book: Book } | { name: 'vocab' } | { name: 'cards' };
 
 function Root() {
   const db = useSQLiteContext();
@@ -29,12 +30,15 @@ function Root() {
       return <ReaderScreen book={route.book} onBack={() => setRoute({ name: 'library' })} />;
     case 'vocab':
       return <VocabScreen onBack={() => setRoute({ name: 'library' })} onChanged={refreshCount} />;
+    case 'cards':
+      return <CardsScreen onBack={() => setRoute({ name: 'library' })} />;
     default:
       return (
         <LibraryScreen
           vocabCount={vocabCount}
           onOpen={(book) => setRoute({ name: 'reader', book })}
           onVocab={() => setRoute({ name: 'vocab' })}
+          onCards={() => setRoute({ name: 'cards' })}
         />
       );
   }

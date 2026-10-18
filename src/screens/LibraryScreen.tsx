@@ -4,9 +4,9 @@ import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from
 import { useSQLiteContext } from 'expo-sqlite';
 import { deleteBook, ensureSampleBook, listBooks, pickAndImportBook, type Book } from '../lib/books';
 
-type Props = { onOpen: (book: Book) => void; onVocab: () => void; vocabCount: number };
+type Props = { onOpen: (book: Book) => void; onVocab: () => void; onCards: () => void; vocabCount: number };
 
-export function LibraryScreen({ onOpen, onVocab, vocabCount }: Props) {
+export function LibraryScreen({ onOpen, onVocab, onCards, vocabCount }: Props) {
   const db = useSQLiteContext();
   const [books, setBooks] = useState<Book[]>([]);
   const [busy, setBusy] = useState(false);
@@ -40,9 +40,14 @@ export function LibraryScreen({ onOpen, onVocab, vocabCount }: Props) {
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.h1}>Библиотека</Text>
-        <Pressable onPress={onVocab} style={styles.vocabBtn}>
-          <Text style={styles.vocabBtnText}>Словарь · {vocabCount}</Text>
-        </Pressable>
+        <View style={styles.headerBtns}>
+          <Pressable onPress={onCards} style={styles.vocabBtn}>
+            <Text style={styles.vocabBtnText}>Карточки</Text>
+          </Pressable>
+          <Pressable onPress={onVocab} style={styles.vocabBtn}>
+            <Text style={styles.vocabBtnText}>Словарь · {vocabCount}</Text>
+          </Pressable>
+        </View>
       </View>
       <FlatList
         data={books}
@@ -71,6 +76,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
   h1: { fontSize: 28, fontWeight: '700' },
+  headerBtns: { flexDirection: 'row', gap: 8 },
   vocabBtn: { backgroundColor: '#eef1f5', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   vocabBtnText: { fontWeight: '600' },
   list: { paddingHorizontal: 16, gap: 10, paddingBottom: 90 },
