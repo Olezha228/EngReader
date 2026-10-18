@@ -12,7 +12,10 @@ Expo/React Native (TypeScript) приложение для iPhone: читалк�
   Менять — через правку ADR на доске, потом код.
 
 ## Команды
+- Node ≥ 22.13 (Expo SDK 58). На ноутбуке владельца глобальный Node — 20 (для Prona), Node 22 лежит в
+  `~/.local/opt/node-v22.20.0-linux-x64/bin` — ставь его первым в PATH для команд этого проекта.
 - `npm install`; `npx expo install <pkg>` — только так добавлять зависимости.
+- `npx expo start --tunnel` — dev-сервер для Expo Go / dev-client; без входа в Expo используй `--tunnel ngrok`.
 - `npx tsc --noEmit` — тайпчек (обязателен перед коммитом). `npx expo lint`.
 - `node scripts/gen-vendor.mjs` — пересобрать `src/reader/vendor.generated.ts` после обновления epub.js/JSZip.
 - Сборка/запуск только через EAS и dev-client (Mac нет): см. README.
