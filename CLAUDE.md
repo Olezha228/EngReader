@@ -16,6 +16,8 @@ Expo/React Native (TypeScript) приложение для iPhone: читалк�
   `~/.local/opt/node-v22.20.0-linux-x64/bin` — ставь его первым в PATH для команд этого проекта.
 - `npm install`; `npx expo install <pkg>` — только так добавлять зависимости.
 - `npx expo start --tunnel` — dev-сервер для Expo Go / dev-client; без входа в Expo используй `--tunnel ngrok`.
+- Вход в Expo/EAS — токен в `~/.config/engreader/expo.env` (переменная `EXPO_TOKEN`, файл 600, вне репо):
+  `set -a; . ~/.config/engreader/expo.env; set +a` перед `eas`/`expo` командами. Проект: @helga103s-team/engreeader.
 - `npx tsc --noEmit` — тайпчек (обязателен перед коммитом). `npx expo lint`.
 - `node scripts/gen-vendor.mjs` — пересобрать `src/reader/vendor.generated.ts` после обновления epub.js/JSZip.
 - Сборка/запуск только через EAS и dev-client (Mac нет): см. README.
