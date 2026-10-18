@@ -17,7 +17,7 @@ export interface ExamplesProvider {
 
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_EXAMPLES = 5;
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 6000;
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   const controller = new AbortController();
@@ -70,6 +70,23 @@ export const tatoeba: ExamplesProvider = {
 
 export function reversoUrl(query: string): string {
   return `https://context.reverso.net/translation/english-russian/${encodeURIComponent(query).replace(/%20/g, '+')}`;
+}
+
+/** Кеш для источников, которые работают не через fetch (Reverso в скрытом WebView). */
+export async function getCachedExamples(db: SQLiteDatabase, provider: string, query: string): Promise<Example[] | null> {
+  const key = `${provider}:${query.toLowerCase()}`;
+  const cached = await db.getFirstAsync<{ payload_json: string; fetched_at: number }>(
+    'SELECT payload_json, fetched_at FROM examples_cache WHERE key = ?', key,
+  );
+  if (!cached || Date.now() - cached.fetched_at >= CACHE_TTL_MS) return null;
+  return JSON.parse(cached.payload_json) as Example[];
+}
+
+export async function putCachedExamples(db: SQLiteDatabase, provider: string, query: string, examples: Example[]): Promise<void> {
+  await db.runAsync(
+    'INSERT OR REPLACE INTO examples_cache (key, provider, payload_json, fetched_at) VALUES (?, ?, ?, ?)',
+    `${provider}:${query.toLowerCase()}`, provider, JSON.stringify(examples), Date.now(),
+  );
 }
 
 /** Примеры с кешем на 30 дней; при любой ошибке сети возвращает закешированные или пустой список и флаг. */

@@ -5,23 +5,27 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import * as Speech from 'expo-speech';
 import * as WebBrowser from 'expo-web-browser';
 import { useSQLiteContext } from 'expo-sqlite';
-import { getExamples, reversoUrl, type Example } from '../lib/examples';
+import { getCachedExamples, getExamples, putCachedExamples, reversoUrl, type Example } from '../lib/examples';
 import { addExampleContext, addToVocab, getVocabStatus, setVocabTranslations, type VocabStatus } from '../lib/vocab';
 import type { Resolved } from '../lib/wordResolver';
+import { REVERSO_SCRAPE_ENABLED, ReversoFetcher } from './ReversoFetcher';
 
 export type TappedWord = Resolved & { sentence: string; cfi: string; bookId: number | null };
 
 type Props = { word: TappedWord | null; onClose: () => void; onChanged?: () => void };
 type Tab = 'translation' | 'examples';
+type SourceState = { status: 'idle' | 'loading' | 'done' | 'error'; items: Example[]; note?: string };
+
+const IDLE: SourceState = { status: 'idle', items: [] };
 
 export function WordSheet({ word, onClose, onChanged }: Props) {
   const db = useSQLiteContext();
   const [tab, setTab] = useState<Tab>('translation');
   const [status, setStatus] = useState<VocabStatus>(null);
-  const [examples, setExamples] = useState<Example[] | null>(null);
-  const [examplesNote, setExamplesNote] = useState<string | null>(null);
-  const [loadingExamples, setLoadingExamples] = useState(false);
+  const [tatoeba, setTatoeba] = useState<SourceState>(IDLE);
+  const [reverso, setReverso] = useState<SourceState>(IDLE);
   const [toast, setToast] = useState<string | null>(null);
+  const examples = tab === 'examples' ? [...reverso.items, ...tatoeba.items] : [];
 
   // Для фразы без словарной статьи заголовок и запись в словарь — сама фраза, а не опорное слово.
   const phraseFallback = !!word?.phraseFallback;
@@ -33,27 +37,42 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
 
   useEffect(() => {
     setTab('translation');
-    setExamples(null);
-    setExamplesNote(null);
+    setTatoeba(IDLE);
+    setReverso(IDLE);
     setToast(null);
     setStatus(null);
     if (!word) return;
     getVocabStatus(db, lemma, pos).then(setStatus).catch(() => setStatus(null));
   }, [db, word, lemma, pos]);
 
+  // Вкладка «Примеры»: Tatoeba (API) и Reverso (скрытый WebView) запрашиваются параллельно.
   useEffect(() => {
-    if (tab !== 'examples' || !word || examples !== null || loadingExamples) return;
+    if (tab !== 'examples' || !word || tatoeba.status !== 'idle') return;
     let cancelled = false;
-    setLoadingExamples(true);
+    setTatoeba({ status: 'loading', items: [] });
     getExamples(db, word.headword).then((res) => {
       if (cancelled) return;
-      setExamples(res.examples);
-      if (res.error && res.examples.length === 0) setExamplesNote(`Не загрузилось: ${res.error.replace(/^Error:\s*/, '')}`);
-      else if (res.examples.length === 0) setExamplesNote('В Tatoeba нет примеров с этой фразой. Попробуйте Reverso.');
-      else if (res.fromCache) setExamplesNote('Из кеша');
-    }).finally(() => { if (!cancelled) setLoadingExamples(false); });
+      if (res.error && res.examples.length === 0) setTatoeba({ status: 'error', items: [], note: `Tatoeba не ответила: ${res.error.replace(/^Error:\s*/, '')}` });
+      else setTatoeba({ status: 'done', items: res.examples, note: res.examples.length ? (res.fromCache ? 'из кеша' : undefined) : 'в Tatoeba примеров нет' });
+    });
+    if (REVERSO_SCRAPE_ENABLED) {
+      getCachedExamples(db, 'reverso', word.headword).then((cached) => {
+        if (cancelled) return;
+        setReverso(cached ? { status: 'done', items: cached, note: cached.length ? 'из кеша' : 'в Reverso примеров нет' } : { status: 'loading', items: [] });
+      });
+    }
     return () => { cancelled = true; };
-  }, [tab, word, examples, loadingExamples, db]);
+  }, [tab, word, tatoeba.status, db]);
+
+  const onReverso = (items: Example[], error?: string) => {
+    if (!word) return;
+    if (error && items.length === 0) {
+      setReverso({ status: 'error', items: [], note: error === 'cloudflare' ? 'Reverso: проверка браузера не прошла — откройте страницу кнопкой ниже' : `Reverso не ответил (${error})` });
+      return;
+    }
+    setReverso({ status: 'done', items, note: items.length ? undefined : 'в Reverso примеров нет' });
+    void putCachedExamples(db, 'reverso', word.headword, items);
+  };
 
   if (!word) return null;
 
@@ -130,7 +149,7 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
           </Pressable>
           <Pressable style={[styles.tab, tab === 'examples' && styles.tabActive]} onPress={() => setTab('examples')}>
             <Text style={[styles.tabText, tab === 'examples' && styles.tabTextActive]}>
-              Примеры{examples ? ` · ${examples.length}` : ''}
+              Примеры{examples.length ? ` · ${examples.length}` : ''}
             </Text>
           </Pressable>
         </View>
@@ -168,25 +187,35 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
             </>
           ) : (
             <>
-              {loadingExamples ? (
-                <View style={styles.loading}><ActivityIndicator /><Text style={styles.note}>Ищем примеры в Tatoeba…</Text></View>
-              ) : null}
-              {examplesNote ? <Text style={styles.note}>{examplesNote}</Text> : null}
-              {(examples ?? []).map((ex, i) => (
-                <View key={i} style={styles.example}>
-                  <Pressable onPress={() => speak(ex.en)}><Text style={styles.exEn}>{ex.en}</Text></Pressable>
-                  <Text style={styles.exRu}>{ex.ru}</Text>
-                  <View style={styles.exFooter}>
-                    <Text style={styles.exSrc}>{ex.source}{ex.license ? ` · ${ex.license}` : ''}</Text>
-                    <Pressable onPress={() => onAddExample(ex)} hitSlop={6} style={styles.exAddBtn}>
-                      <Text style={styles.exAdd}>{status ? '+ к карточке' : '+ в словарь с примером'}</Text>
-                    </Pressable>
+              {[{ name: 'Reverso Context', s: reverso }, { name: 'Tatoeba', s: tatoeba }].map(({ name, s }) => (
+                s.status === 'idle' ? null : (
+                  <View key={name} style={styles.sourceBlock}>
+                    <View style={styles.sourceHead}>
+                      <Text style={styles.sourceName}>{name}</Text>
+                      {s.status === 'loading' ? <ActivityIndicator size="small" /> : null}
+                      {s.note ? <Text style={styles.note}>{s.note}</Text> : null}
+                    </View>
+                    {s.items.map((ex, i) => (
+                      <View key={i} style={styles.example}>
+                        <Pressable onPress={() => speak(ex.en)}><Text style={styles.exEn}>{ex.en}</Text></Pressable>
+                        <Text style={styles.exRu}>{ex.ru}</Text>
+                        <View style={styles.exFooter}>
+                          <Text style={styles.exSrc}>{ex.license ? ex.license : ' '}</Text>
+                          <Pressable onPress={() => onAddExample(ex)} hitSlop={6} style={styles.exAddBtn}>
+                            <Text style={styles.exAdd}>{status ? '+ к карточке' : '+ в словарь с примером'}</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
                   </View>
-                </View>
+                )
               ))}
               <Pressable style={styles.reversoRow} onPress={() => WebBrowser.openBrowserAsync(reversoUrl(word.headword))}>
-                <Text style={styles.reversoText}>Больше примеров в Reverso Context ↗</Text>
+                <Text style={styles.reversoText}>Открыть страницу Reverso Context ↗</Text>
               </Pressable>
+              {tab === 'examples' && reverso.status === 'loading' && REVERSO_SCRAPE_ENABLED ? (
+                <ReversoFetcher key={word.headword} query={word.headword} onResult={onReverso} />
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -233,7 +262,9 @@ const styles = StyleSheet.create({
   sense: { fontSize: 17, lineHeight: 23 },
   missing: { color: '#a33', fontSize: 15, lineHeight: 21 },
   context: { color: '#333', fontStyle: 'italic', marginTop: 6, lineHeight: 20 },
-  loading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sourceBlock: { gap: 8 },
+  sourceHead: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  sourceName: { fontWeight: '700', color: '#334', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 },
   note: { color: '#666', fontSize: 13 },
   example: { gap: 3, borderLeftWidth: 2, borderLeftColor: '#dde3ea', paddingLeft: 10, paddingVertical: 2 },
   exEn: { fontSize: 16 },
