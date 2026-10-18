@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "EngReader",
+    "slug": "engreader",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "engreader",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.olezha228.engreader",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "EPUB",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["org.idpf.epub-container"]
+          }
+        ],
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true
+      }
+    },
+    "android": {
+      "package": "com.olezha228.engreader",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-sqlite", "expo-web-browser", "expo-asset"]
+  }
+}
