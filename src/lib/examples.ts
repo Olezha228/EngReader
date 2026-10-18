@@ -17,7 +17,7 @@ export interface ExamplesProvider {
 
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_EXAMPLES = 5;
-const TIMEOUT_MS = 4000;
+const TIMEOUT_MS = 8000;
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   const controller = new AbortController();
@@ -41,12 +41,14 @@ type TatoebaResult = {
 export const tatoeba: ExamplesProvider = {
   name: 'tatoeba',
   async fetch(query: string): Promise<Example[]> {
-    // «=слово» — точное совпадение словоформы; для фраз Tatoeba ищет все слова.
-    const q = encodeURIComponent(`=${query}`);
+    // Одно слово: «=слово» — точная словоформа. Фраза: в кавычках — точная последовательность слов.
+    const trimmed = query.trim();
+    const q = encodeURIComponent(/\s/.test(trimmed) ? `"${trimmed}"` : `=${trimmed}`);
     const url = `https://tatoeba.org/en/api_v0/search?from=eng&to=rus&query=${q}&sort=relevance`;
     const res = await fetchWithTimeout(url, TIMEOUT_MS);
     if (!res.ok) throw new Error(`tatoeba ${res.status}`);
     const json = (await res.json()) as { results?: TatoebaResult[] };
+    console.log('[examples] tatoeba', trimmed, 'results:', json.results?.length ?? 0);
     const out: Example[] = [];
     for (const r of json.results ?? []) {
       const direct = r.translations?.[0]?.find((t) => t.lang === 'rus');
@@ -91,6 +93,7 @@ export async function getExamples(
     );
     return { examples, fromCache: false };
   } catch (e) {
+    console.log('[examples] failed', query, String(e));
     if (cached) return { examples: JSON.parse(cached.payload_json) as Example[], fromCache: true, error: String(e) };
     return { examples: [], fromCache: false, error: String(e) };
   }

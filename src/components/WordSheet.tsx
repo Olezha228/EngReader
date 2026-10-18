@@ -95,9 +95,11 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
 
   const onExamples = async () => {
     setLoadingExamples(true);
+    setExamplesNote(null);
     const res = await getExamples(db, word.headword);
     setExamples(res.examples);
-    if (res.error && res.examples.length === 0) setExamplesNote('Нужна сеть: примеры не загрузились');
+    if (res.error && res.examples.length === 0) setExamplesNote(`Примеры не загрузились: ${res.error.replace(/^Error:\s*/, '')}`);
+    else if (res.examples.length === 0) setExamplesNote('В Tatoeba примеров с этой фразой нет — попробуйте Reverso ↗');
     else if (res.fromCache) setExamplesNote('Из кеша');
     setLoadingExamples(false);
   };
@@ -172,7 +174,6 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
           {examples ? (
             <View style={styles.examples}>
               {examplesNote ? <Text style={styles.note}>{examplesNote}</Text> : null}
-              {examples.length === 0 && !examplesNote ? <Text style={styles.note}>Примеров не нашлось</Text> : null}
               {examples.map((ex, i) => (
                 <View key={i} style={styles.example}>
                   <Text style={styles.exEn}>{ex.en}</Text>

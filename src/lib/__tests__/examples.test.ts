@@ -24,11 +24,13 @@ describe('tatoeba provider', () => {
     expect(examples[0].url).toMatch(/tatoeba\.org\/en\/sentences\/show\/\d+/);
   });
 
-  test('запрос — точное совпадение словоформы', async () => {
+  test('одно слово — точная словоформа (=), фраза — в кавычках', async () => {
     mockFetch(200, { results: [] });
+    await tatoeba.fetch('run');
+    expect((global.fetch as jest.Mock).mock.calls[0][0] as string).toContain('query=%3Drun');
     await tatoeba.fetch('give up');
-    const url = (global.fetch as jest.Mock).mock.calls[0][0] as string;
-    expect(url).toContain('query=%3Dgive%20up');
+    const url = (global.fetch as jest.Mock).mock.calls[1][0] as string;
+    expect(url).toContain('query=%22give%20up%22');
     expect(url).toContain('from=eng&to=rus');
   });
 
