@@ -15,7 +15,9 @@ export type Book = {
   percent: number;
 };
 
-export type ReadingState = { cfi: string | null; percent: number; font_size: number };
+export type ReaderTheme = 'light' | 'sepia' | 'dark';
+export const READER_THEMES: ReaderTheme[] = ['light', 'sepia', 'dark'];
+export type ReadingState = { cfi: string | null; percent: number; font_size: number; theme: ReaderTheme };
 
 function booksDir(): Directory {
   const dir = new Directory(Paths.document, 'books');
@@ -81,9 +83,9 @@ export async function readBookBase64(filePath: string): Promise<string> {
 
 export async function getReadingState(db: SQLiteDatabase, bookId: number): Promise<ReadingState> {
   const row = await db.getFirstAsync<ReadingState>(
-    'SELECT cfi, percent, font_size FROM reading_state WHERE book_id = ?', bookId,
+    'SELECT cfi, percent, font_size, theme FROM reading_state WHERE book_id = ?', bookId,
   );
-  return row ?? { cfi: null, percent: 0, font_size: 100 };
+  return row ?? { cfi: null, percent: 0, font_size: 100, theme: 'light' };
 }
 
 export async function saveReadingState(
@@ -92,10 +94,10 @@ export async function saveReadingState(
   const current = await getReadingState(db, bookId);
   const next = { ...current, ...state };
   await db.runAsync(
-    `INSERT INTO reading_state (book_id, cfi, percent, font_size, updated_at) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO reading_state (book_id, cfi, percent, font_size, theme, updated_at) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(book_id) DO UPDATE SET cfi = excluded.cfi, percent = excluded.percent,
-       font_size = excluded.font_size, updated_at = excluded.updated_at`,
-    bookId, next.cfi, next.percent, next.font_size, Date.now(),
+       font_size = excluded.font_size, theme = excluded.theme, updated_at = excluded.updated_at`,
+    bookId, next.cfi, next.percent, next.font_size, next.theme, Date.now(),
   );
   await db.runAsync('UPDATE books SET last_opened_at = ? WHERE id = ?', Date.now(), bookId);
 }

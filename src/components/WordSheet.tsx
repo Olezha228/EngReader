@@ -5,14 +5,14 @@ import * as Speech from 'expo-speech';
 import * as WebBrowser from 'expo-web-browser';
 import { useSQLiteContext } from 'expo-sqlite';
 import { getExamples, reversoUrl, type Example } from '../lib/examples';
-import { addToVocab, getVocabStatus, type VocabStatus } from '../lib/vocab';
+import { addExampleContext, addToVocab, getVocabStatus, type VocabStatus } from '../lib/vocab';
 import type { Resolved } from '../lib/wordResolver';
 
 export type TappedWord = Resolved & { sentence: string; cfi: string; bookId: number | null };
 
-type Props = { word: TappedWord | null; onClose: () => void };
+type Props = { word: TappedWord | null; onClose: () => void; onChanged?: () => void };
 
-export function WordSheet({ word, onClose }: Props) {
+export function WordSheet({ word, onClose, onChanged }: Props) {
   const db = useSQLiteContext();
   const [status, setStatus] = useState<VocabStatus>(null);
   const [examples, setExamples] = useState<Example[] | null>(null);
@@ -42,6 +42,16 @@ export function WordSheet({ word, onClose }: Props) {
     });
     setStatus({ id: res.id, seen_count: res.seenCount });
     setSaved(res.isNew ? 'Добавлено в словарь' : `Уже в словаре · встречено ${res.seenCount} раз`);
+    onChanged?.();
+  };
+
+  const onAddExample = async (ex: Example) => {
+    if (!status) return;
+    const added = await addExampleContext(db, {
+      vocabId: status.id, headword: word.headword, en: ex.en, ru: ex.ru, source: ex.source,
+    });
+    setSaved(added ? 'Пример добавлен к карточке' : 'Этот пример уже есть');
+    onChanged?.();
   };
 
   const onExamples = async () => {
@@ -113,7 +123,14 @@ export function WordSheet({ word, onClose }: Props) {
                 <View key={i} style={styles.example}>
                   <Text style={styles.exEn}>{ex.en}</Text>
                   <Text style={styles.exRu}>{ex.ru}</Text>
-                  <Text style={styles.exSrc}>{ex.source}{ex.license ? ` · ${ex.license}` : ''}</Text>
+                  <View style={styles.exFooter}>
+                    <Text style={styles.exSrc}>{ex.source}{ex.license ? ` · ${ex.license}` : ''}</Text>
+                    {status ? (
+                      <Pressable onPress={() => onAddExample(ex)} hitSlop={6}>
+                        <Text style={styles.exAdd}>+ к карточке</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
               ))}
             </View>
@@ -153,5 +170,7 @@ const styles = StyleSheet.create({
   example: { gap: 2, borderLeftWidth: 2, borderLeftColor: '#dde3ea', paddingLeft: 8 },
   exEn: { fontSize: 15 },
   exRu: { fontSize: 15, color: '#444' },
-  exSrc: { fontSize: 11, color: '#888' },
+  exSrc: { fontSize: 11, color: '#888', flex: 1 },
+  exFooter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  exAdd: { fontSize: 12, color: '#2f6fed', fontWeight: '600' },
 });

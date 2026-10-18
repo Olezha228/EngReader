@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS reading_state (
   cfi TEXT,
   percent REAL NOT NULL DEFAULT 0,
   font_size INTEGER NOT NULL DEFAULT 100,
+  theme TEXT NOT NULL DEFAULT 'light',
   updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS vocab (
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS vocab_contexts (
   vocab_id INTEGER NOT NULL REFERENCES vocab(id) ON DELETE CASCADE,
   form TEXT NOT NULL,
   sentence TEXT NOT NULL,
+  translation TEXT,
   book_id INTEGER REFERENCES books(id) ON DELETE SET NULL,
   cfi TEXT,
   source TEXT NOT NULL DEFAULT 'book',

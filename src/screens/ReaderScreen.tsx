@@ -4,9 +4,16 @@ import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, Vi
 import { useSQLiteContext } from 'expo-sqlite';
 import { readerHtml } from '../reader/readerHtml';
 import { WebView, type WebViewHandle, type WebViewMessageEvent } from '../reader/WebViewTyped';
-import { getReadingState, readBookBase64, saveReadingState, updateBookMeta, type Book } from '../lib/books';
+import {
+  getReadingState, readBookBase64, READER_THEMES, saveReadingState, updateBookMeta, type Book, type ReaderTheme,
+} from '../lib/books';
+import { knownWords } from '../lib/vocab';
 import { resolveWord } from '../lib/wordResolver';
 import { WordSheet, type TappedWord } from '../components/WordSheet';
+
+const THEME_LABEL: Record<ReaderTheme, string> = { light: 'Светлая', sepia: 'Сепия', dark: 'Тёмная' };
+const THEME_BG: Record<ReaderTheme, string> = { light: '#ffffff', sepia: '#f4ecd8', dark: '#121212' };
+const THEME_FG: Record<ReaderTheme, string> = { light: '#333', sepia: '#5b4636', dark: '#d6d6d6' };
 
 type Msg =
   | { type: 'loaded' }
@@ -24,6 +31,7 @@ export function ReaderScreen({ book, onBack }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [percent, setPercent] = useState(book.percent);
   const [fontSize, setFontSize] = useState(100);
+  const [theme, setTheme] = useState<ReaderTheme>('light');
   const [tapped, setTapped] = useState<TappedWord | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCfi = useRef<string | null>(null);
@@ -32,11 +40,20 @@ export function ReaderScreen({ book, onBack }: Props) {
     webRef.current?.injectJavaScript(`${js}; true;`);
   }, []);
 
+  const refreshKnown = useCallback(async () => {
+    const words = await knownWords(db);
+    inject(`window.__setKnown(${JSON.stringify(words)})`);
+  }, [db, inject]);
+
   const openBook = useCallback(async () => {
     try {
-      const [b64, state] = await Promise.all([readBookBase64(book.file_path), getReadingState(db, book.id)]);
+      const [b64, state, known] = await Promise.all([
+        readBookBase64(book.file_path), getReadingState(db, book.id), knownWords(db),
+      ]);
       setFontSize(state.font_size);
-      inject(`window.__openBook(${JSON.stringify(b64)}, ${JSON.stringify(state.cfi)}, { fontSize: ${state.font_size} })`);
+      setTheme(state.theme);
+      const settings = { fontSize: state.font_size, theme: state.theme, known };
+      inject(`window.__openBook(${JSON.stringify(b64)}, ${JSON.stringify(state.cfi)}, ${JSON.stringify(settings)})`);
     } catch (e) {
       setStatus('error');
       Alert.alert('Не удалось открыть книгу', String(e));
@@ -89,13 +106,25 @@ export function ReaderScreen({ book, onBack }: Props) {
     void saveReadingState(db, book.id, { font_size: next });
   };
 
+  const cycleTheme = () => {
+    const next = READER_THEMES[(READER_THEMES.indexOf(theme) + 1) % READER_THEMES.length];
+    setTheme(next);
+    inject(`window.__setTheme(${JSON.stringify(next)})`);
+    void saveReadingState(db, book.id, { theme: next });
+  };
+
+  const fg = { color: THEME_FG[theme] };
+
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={[styles.root, { backgroundColor: THEME_BG[theme] }]}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={10}><Text style={styles.back}>‹ Библиотека</Text></Pressable>
-        <Text style={styles.title} numberOfLines={1}>{book.title}</Text>
-        <Pressable onPress={() => changeFont(-10)} hitSlop={8}><Text style={styles.fontBtn}>A−</Text></Pressable>
-        <Pressable onPress={() => changeFont(10)} hitSlop={8}><Text style={styles.fontBtn}>A+</Text></Pressable>
+        <Text style={[styles.title, fg]} numberOfLines={1}>{book.title}</Text>
+        <Pressable onPress={cycleTheme} hitSlop={8} accessibilityLabel={`Тема: ${THEME_LABEL[theme]}`}>
+          <Text style={[styles.fontBtn, fg]}>◐</Text>
+        </Pressable>
+        <Pressable onPress={() => changeFont(-10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A−</Text></Pressable>
+        <Pressable onPress={() => changeFont(10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A+</Text></Pressable>
       </View>
       <View style={styles.webWrap}>
         <WebView
@@ -111,17 +140,19 @@ export function ReaderScreen({ book, onBack }: Props) {
           onShouldStartLoadWithRequest={(req: { url: string }) =>
             req.url === 'about:blank' || req.url.startsWith('blob:') || req.url.startsWith('data:')
           }
-          style={styles.web}
+          style={[styles.web, { backgroundColor: THEME_BG[theme] }]}
         />
         {status === 'loading' ? (
-          <View style={styles.overlay}><ActivityIndicator size="large" /><Text style={styles.overlayText}>Открываем книгу…</Text></View>
+          <View style={[styles.overlay, { backgroundColor: THEME_BG[theme] }]}>
+            <ActivityIndicator size="large" /><Text style={styles.overlayText}>Открываем книгу…</Text>
+          </View>
         ) : null}
       </View>
       <View style={styles.footer}>
         <Text style={styles.progress}>{Math.round(percent * 100)} %</Text>
         <Text style={styles.hint}>тап по слову — перевод · края и свайп — листать</Text>
       </View>
-      <WordSheet word={tapped} onClose={() => setTapped(null)} />
+      <WordSheet word={tapped} onClose={() => setTapped(null)} onChanged={() => void refreshKnown()} />
     </SafeAreaView>
   );
 }

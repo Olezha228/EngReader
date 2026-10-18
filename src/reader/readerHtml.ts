@@ -6,7 +6,8 @@
 //   {type:'word', word, sentence, prev, next, cfi} — тап по слову
 //   {type:'miss'}                           — тап не по тексту
 //   {type:'error', message}
-// Команды из RN: window.__openBook(base64, cfi, {fontSize}), __next(), __prev(), __setFontSize(percent)
+// Команды из RN: window.__openBook(base64, cfi, {fontSize, theme, known}), __next(), __prev(),
+//   __setFontSize(percent), __setTheme('light'|'sepia'|'dark'), __setKnown(string[])
 import { EPUBJS, JSZIP } from './vendor.generated';
 
 export const readerHtml = `<!DOCTYPE html>
@@ -30,6 +31,59 @@ export const readerHtml = `<!DOCTYPE html>
   };
   var book = null, rendition = null;
   var WORD_CHAR = /[A-Za-z\\u00C0-\\u024F'\\u2019-]/;
+  var THEMES = {
+    light: { body: { background: '#ffffff', color: '#1a1a1a' } },
+    sepia: { body: { background: '#f4ecd8', color: '#5b4636' } },
+    dark:  { body: { background: '#121212', color: '#d6d6d6' } }
+  };
+  var KNOWN_STYLE = { 'mark.er-known': { background: 'transparent', color: 'inherit', 'border-bottom': '2px solid rgba(47,111,237,0.55)' } };
+  var knownRe = null;
+
+  function escRe(s) { return s.replace(/[.*+?^$\\{\\}()|\\[\\]\\\\]/g, '\\\\$&'); }
+  function setKnownList(list) {
+    list = (list || []).filter(function (w) { return w && /^[A-Za-z][A-Za-z'\\u2019-]*( [A-Za-z'\\u2019-]+)?$/.test(w); }).slice(0, 3000);
+    knownRe = list.length ? new RegExp('\\\\b(' + list.map(escRe).join('|') + ')\\\\b', 'gi') : null;
+  }
+  // Подчёркиваем слова из словаря: оборачиваем совпадения в <mark>, не трогая разметку.
+  function highlightKnown(doc) {
+    if (!knownRe || !doc || !doc.body) return;
+    var walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        if (!p || /^(SCRIPT|STYLE|MARK|TITLE)$/.test(p.tagName)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue;
+      knownRe.lastIndex = 0;
+      if (!knownRe.test(text)) return;
+      knownRe.lastIndex = 0;
+      var frag = doc.createDocumentFragment(), last = 0, m;
+      while ((m = knownRe.exec(text))) {
+        if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
+        var mark = doc.createElement('mark');
+        mark.className = 'er-known';
+        mark.textContent = m[0];
+        frag.appendChild(mark);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(doc.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+  function unhighlight(doc) {
+    if (!doc || !doc.body) return;
+    var marks = doc.body.querySelectorAll('mark.er-known');
+    for (var i = 0; i < marks.length; i++) {
+      var mk = marks[i];
+      mk.parentNode.replaceChild(doc.createTextNode(mk.textContent), mk);
+    }
+    doc.body.normalize();
+  }
   var BLOCK = /^(P|DIV|LI|BLOCKQUOTE|H[1-6]|TD|DD|DT|BODY|SECTION|ARTICLE)$/;
 
   function expandWord(text, offset) {
@@ -95,6 +149,7 @@ export const readerHtml = `<!DOCTYPE html>
   function attach(contents) {
     var doc = contents.document;
     var start = null;
+    highlightKnown(doc);
     doc.addEventListener('touchstart', function (e) {
       var t = e.touches[0];
       start = { x: t.clientX, y: t.clientY, t: Date.now() };
@@ -125,7 +180,12 @@ export const readerHtml = `<!DOCTYPE html>
       book.open(b64, 'base64');
       rendition = book.renderTo('viewer', { width: '100%', height: '100%', flow: 'paginated', spread: 'none' });
       var fs = (settings && settings.fontSize) || 100;
-      rendition.themes.default({ body: { 'padding': '0 10px !important' } });
+      rendition.themes.default(Object.assign({ body: { 'padding': '0 10px !important' } }, KNOWN_STYLE));
+      Object.keys(THEMES).forEach(function (name) {
+        rendition.themes.register(name, Object.assign({}, THEMES[name], KNOWN_STYLE));
+      });
+      setKnownList(settings && settings.known);
+      window.__setTheme((settings && settings.theme) || 'light');
       rendition.themes.fontSize(fs + '%');
       rendition.hooks.content.register(attach);
       rendition.on('relocated', function (loc) {
@@ -146,6 +206,16 @@ export const readerHtml = `<!DOCTYPE html>
   window.__next = function () { if (rendition) rendition.next(); };
   window.__prev = function () { if (rendition) rendition.prev(); };
   window.__setFontSize = function (p) { if (rendition) rendition.themes.fontSize(p + '%'); };
+  window.__setTheme = function (name) {
+    var t = THEMES[name] || THEMES.light;
+    document.body.style.background = t.body.background;
+    if (rendition) rendition.themes.select(THEMES[name] ? name : 'light');
+  };
+  window.__setKnown = function (list) {
+    setKnownList(list);
+    if (!rendition) return;
+    rendition.getContents().forEach(function (c) { unhighlight(c.document); highlightKnown(c.document); });
+  };
 
   post({ type: 'loaded' });
 })();

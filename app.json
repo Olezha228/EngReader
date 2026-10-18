@@ -16,7 +16,9 @@
           {
             "CFBundleTypeName": "EPUB",
             "LSHandlerRank": "Alternate",
-            "LSItemContentTypes": ["org.idpf.epub-container"]
+            "LSItemContentTypes": [
+              "org.idpf.epub-container"
+            ]
           }
         ],
         "UIFileSharingEnabled": true,
@@ -36,6 +38,11 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-sqlite", "expo-web-browser", "expo-asset"]
+    "plugins": [
+      "expo-sqlite",
+      "expo-web-browser",
+      "expo-asset",
+      "expo-sharing"
+    ]
   }
 }

@@ -4,9 +4,11 @@ import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from
 import { useSQLiteContext } from 'expo-sqlite';
 import { deleteBook, ensureSampleBook, listBooks, pickAndImportBook, type Book } from '../lib/books';
 
-type Props = { onOpen: (book: Book) => void; onVocab: () => void; onCards: () => void; vocabCount: number };
+type Props = {
+  onOpen: (book: Book) => void; onVocab: () => void; onCards: () => void; onAbout: () => void; vocabCount: number;
+};
 
-export function LibraryScreen({ onOpen, onVocab, onCards, vocabCount }: Props) {
+export function LibraryScreen({ onOpen, onVocab, onCards, onAbout, vocabCount }: Props) {
   const db = useSQLiteContext();
   const [books, setBooks] = useState<Book[]>([]);
   const [busy, setBusy] = useState(false);
@@ -46,6 +48,9 @@ export function LibraryScreen({ onOpen, onVocab, onCards, vocabCount }: Props) {
           </Pressable>
           <Pressable onPress={onVocab} style={styles.vocabBtn}>
             <Text style={styles.vocabBtnText}>Словарь · {vocabCount}</Text>
+          </Pressable>
+          <Pressable onPress={onAbout} style={styles.vocabBtn} accessibilityLabel="О приложении">
+            <Text style={styles.vocabBtnText}>ⓘ</Text>
           </Pressable>
         </View>
       </View>
