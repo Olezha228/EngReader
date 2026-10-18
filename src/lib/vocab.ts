@@ -74,7 +74,16 @@ export async function knownWords(db: SQLiteDatabase): Promise<string[]> {
   return rows.map((r) => r.w).filter((w) => w.length > 1);
 }
 
-/** Пример употребления из внешнего источника как дополнительный контекст слова (US-4.4). */
+/** Перевод, заданный пользователем (для фраз и слов, которых нет в словаре). */
+export async function setVocabTranslations(db: SQLiteDatabase, id: number, translations: string[]): Promise<void> {
+  const clean = translations.map((t) => t.trim()).filter(Boolean);
+  await db.runAsync('UPDATE vocab SET translations_json = ? WHERE id = ?', JSON.stringify(clean), id);
+}
+
+/**
+ * Пример употребления из внешнего источника как дополнительный контекст слова (US-4.4).
+ * Если у слова ещё нет перевода (фраза вне словаря), русская часть примера становится его переводом.
+ */
 export async function addExampleContext(
   db: SQLiteDatabase,
   args: { vocabId: number; headword: string; en: string; ru: string; source: string },
@@ -88,6 +97,9 @@ export async function addExampleContext(
      VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
     args.vocabId, args.headword, args.en, args.ru, args.source, Date.now(),
   );
+  const row = await db.getFirstAsync<{ translations_json: string }>('SELECT translations_json FROM vocab WHERE id = ?', args.vocabId);
+  const current = row ? (JSON.parse(row.translations_json) as string[]) : [];
+  if (current.length === 0 && args.ru) await setVocabTranslations(db, args.vocabId, [args.ru]);
   return true;
 }
 

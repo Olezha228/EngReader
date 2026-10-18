@@ -134,6 +134,7 @@ export function CardsScreen({ onBack }: Props) {
                     <Text style={styles.context}>« {current.sentence} »</Text>
                   </Pressable>
                 ) : null}
+                {current.sentence_translation ? <Text style={styles.contextRu}>{current.sentence_translation}</Text> : null}
               </View>
               <View style={styles.grades}>
                 {GRADES.map((g) => (
@@ -188,6 +189,7 @@ const styles = StyleSheet.create({
   ipa: { color: '#555', fontSize: 16 },
   tr: { fontSize: 17 },
   context: { color: '#444', fontStyle: 'italic', marginTop: 6, lineHeight: 22 },
+  contextRu: { color: '#666', lineHeight: 20 },
   grades: { flexDirection: 'row', gap: 8, marginTop: 8 },
   gradeBtn: { flex: 1, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   gradeLabel: { color: '#fff', fontWeight: '700' },

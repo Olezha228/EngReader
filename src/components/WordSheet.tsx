@@ -1,11 +1,11 @@
 // Карточка слова снизу экрана: лемма, транскрипция, переводы, контекст, «В словарь», «Примеры», озвучка.
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Speech from 'expo-speech';
 import * as WebBrowser from 'expo-web-browser';
 import { useSQLiteContext } from 'expo-sqlite';
 import { getExamples, reversoUrl, type Example } from '../lib/examples';
-import { addExampleContext, addToVocab, getVocabStatus, type VocabStatus } from '../lib/vocab';
+import { addExampleContext, addToVocab, getVocabStatus, setVocabTranslations, type VocabStatus } from '../lib/vocab';
 import type { Resolved } from '../lib/wordResolver';
 
 export type TappedWord = Resolved & { sentence: string; cfi: string; bookId: number | null };
@@ -49,12 +49,48 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
   };
 
   const onAddExample = async (ex: Example) => {
-    if (!status) return;
-    const added = await addExampleContext(db, {
-      vocabId: status.id, headword: word.headword, en: ex.en, ru: ex.ru, source: ex.source,
-    });
-    setSaved(added ? 'Пример добавлен к карточке' : 'Этот пример уже есть');
+    if (!word) return;
+    // Слова ещё нет в словаре — сначала добавим, чтобы пример и перевод было к чему привязать.
+    let vocabId = status?.id;
+    if (!vocabId) {
+      const res = await addToVocab(db, { headword: lemma, entry, form: word.form, sentence: word.sentence, bookId: word.bookId, cfi: word.cfi });
+      vocabId = res.id;
+      setStatus({ id: res.id, seen_count: res.seenCount });
+    }
+    const added = await addExampleContext(db, { vocabId, headword: word.headword, en: ex.en, ru: ex.ru, source: ex.source });
+    setSaved(added
+      ? (entry ? 'Пример добавлен к карточке' : 'Пример добавлен, его перевод стал переводом фразы')
+      : 'Этот пример уже есть');
     onChanged?.();
+  };
+
+  // Свой перевод — для фраз и слов вне словаря (Alert.prompt есть на iOS).
+  const onOwnTranslation = () => {
+    if (!word) return;
+    Alert.prompt(
+      `Перевод для «${lemma}»`,
+      'Несколько вариантов — через точку с запятой',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Сохранить',
+          onPress: async (text?: string) => {
+            const list = (text ?? '').split(';').map((s) => s.trim()).filter(Boolean);
+            if (list.length === 0) return;
+            let vocabId = status?.id;
+            if (!vocabId) {
+              const res = await addToVocab(db, { headword: lemma, entry, form: word.form, sentence: word.sentence, bookId: word.bookId, cfi: word.cfi });
+              vocabId = res.id;
+              setStatus({ id: res.id, seen_count: res.seenCount });
+            }
+            await setVocabTranslations(db, vocabId, list);
+            setSaved(`Перевод сохранён: ${list.join('; ')}`);
+            onChanged?.();
+          },
+        },
+      ],
+      'plain-text',
+    );
   };
 
   const onExamples = async () => {
@@ -124,6 +160,11 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
             <Pressable style={styles.btn} onPress={() => WebBrowser.openBrowserAsync(reversoUrl(word.headword))}>
               <Text style={styles.btnText}>Reverso ↗</Text>
             </Pressable>
+            {(phraseFallback || word.entries.length === 0) ? (
+              <Pressable style={styles.btn} onPress={onOwnTranslation}>
+                <Text style={styles.btnText}>Свой перевод</Text>
+              </Pressable>
+            ) : null}
           </View>
           {saved ? <Text style={styles.note}>{saved}</Text> : null}
 
@@ -138,11 +179,9 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
                   <Text style={styles.exRu}>{ex.ru}</Text>
                   <View style={styles.exFooter}>
                     <Text style={styles.exSrc}>{ex.source}{ex.license ? ` · ${ex.license}` : ''}</Text>
-                    {status ? (
-                      <Pressable onPress={() => onAddExample(ex)} hitSlop={6}>
-                        <Text style={styles.exAdd}>+ к карточке</Text>
-                      </Pressable>
-                    ) : null}
+                    <Pressable onPress={() => onAddExample(ex)} hitSlop={6}>
+                      <Text style={styles.exAdd}>{status ? '+ к карточке' : '+ в словарь с этим примером'}</Text>
+                    </Pressable>
                   </View>
                 </View>
               ))}

@@ -43,6 +43,7 @@ export type QueueItem = CardRow & {
   note: string | null;
   form: string | null;
   sentence: string | null;
+  sentence_translation: string | null;
 };
 
 export type Queue = { items: QueueItem[]; dueCount: number; newCount: number; newLimit: number };
@@ -129,7 +130,8 @@ export async function ensureCard(db: SQLiteDatabase, vocabId: number, contextId:
 
 const QUEUE_SELECT = `
   SELECT c.*, v.lemma, v.pos, v.ipa, v.translations_json, v.is_leech, v.note,
-         COALESCE(ctx.form, fc.form) AS form, COALESCE(ctx.sentence, fc.sentence) AS sentence
+         COALESCE(ctx.form, fc.form) AS form, COALESCE(ctx.sentence, fc.sentence) AS sentence,
+         COALESCE(ctx.translation, fc.translation) AS sentence_translation
     FROM cards c
     JOIN vocab v ON v.id = c.vocab_id
     LEFT JOIN vocab_contexts ctx ON ctx.id = c.context_id
