@@ -321,6 +321,13 @@ export const readerHtml = `<!DOCTYPE html>
     document.body.style.background = t.body.background;
     if (rendition) rendition.themes.select(THEMES[name] ? name : 'light');
   };
+  window.__clearSelection = function () {
+    lastSelection = '';
+    if (!rendition) return;
+    rendition.getContents().forEach(function (c) {
+      try { var s = c.window.getSelection(); if (s) s.removeAllRanges(); } catch (e) {}
+    });
+  };
   window.__setKnown = function (list) {
     setKnownList(list);
     if (!rendition) return;

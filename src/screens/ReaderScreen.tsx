@@ -64,6 +64,7 @@ export function ReaderScreen({ book, onBack }: Props) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCfi = useRef<string | null>(null);
+  const sheetOpen = useRef(false);
 
   const inject = useCallback((js: string) => {
     webRef.current?.injectJavaScript(`${js}; true;`);
@@ -133,11 +134,15 @@ export function ReaderScreen({ book, onBack }: Props) {
         }, 1000);
         break;
       case 'word': {
+        // Пока карточка открыта, новые слова не принимаем: иначе дрожание выделения сбрасывает её содержимое.
+        if (sheetOpen.current) break;
+        sheetOpen.current = true;
         const sentenceStart = msg.sentence.replace(/^[^A-Za-z]+/, '').startsWith(msg.word.replace(/^[^A-Za-z]+/, ''));
         const resolved = msg.selection || /\s/.test(msg.word.trim())
           ? await resolvePhrase(db, msg.word)
           : await resolveWord(db, msg.word, { prev: msg.prev, next: msg.next }, { sentenceStart });
         setControls(false);
+        inject('window.__clearSelection()');
         setTapped({ ...resolved, sentence: msg.sentence, cfi: msg.cfi, bookId: book.id });
         break;
       }
@@ -291,7 +296,11 @@ export function ReaderScreen({ book, onBack }: Props) {
         </SafeAreaView>
       </Modal>
 
-      <WordSheet word={tapped} onClose={() => setTapped(null)} onChanged={() => void refreshKnown()} />
+      <WordSheet
+        word={tapped}
+        onClose={() => { sheetOpen.current = false; setTapped(null); }}
+        onChanged={() => void refreshKnown()}
+      />
     </SafeAreaView>
   );
 }
