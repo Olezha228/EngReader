@@ -27,6 +27,7 @@ type Msg =
   | { type: 'ready'; title: string; author: string }
   | { type: 'relocated'; cfi: string; percent: number; href: string }
   | { type: 'tap' }
+  | { type: 'selection'; text: string; words: number }
   | { type: 'toc'; items: TocItem[] }
   | { type: 'word'; word: string; sentence: string; prev: string; next: string; cfi: string; selection?: boolean }
   | { type: 'too_long'; words: number }
@@ -61,6 +62,7 @@ export function ReaderScreen({ book, onBack }: Props) {
   const [tocOpen, setTocOpen] = useState(false);
   const [controls, setControls] = useState(false);
   const [barWidth, setBarWidth] = useState(0);
+  const [selection, setSelection] = useState<{ text: string; words: number } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCfi = useRef<string | null>(null);
@@ -100,7 +102,7 @@ export function ReaderScreen({ book, onBack }: Props) {
   const onMessage = useCallback(async (event: WebViewMessageEvent) => {
     let msg: Msg;
     try { msg = JSON.parse(event.nativeEvent.data) as Msg; } catch { return; }
-    if (msg.type !== 'relocated' && msg.type !== 'toc') {
+    if (msg.type !== 'relocated' && msg.type !== 'toc' && msg.type !== 'selection') {
       console.log('[reader]', msg.type, 'msg' in msg ? msg.msg : 'message' in msg ? msg.message : 'word' in msg ? `«${msg.word}»` : '');
     }
     switch (msg.type) {
@@ -115,6 +117,9 @@ export function ReaderScreen({ book, onBack }: Props) {
         break;
       case 'toc':
         setToc(msg.items.filter((i) => i.label));
+        break;
+      case 'selection':
+        setSelection(msg.text ? { text: msg.text, words: msg.words } : null);
         break;
       case 'tap':
         setControls((v) => {
@@ -240,6 +245,21 @@ export function ReaderScreen({ book, onBack }: Props) {
           </View>
         ) : null}
 
+        {selection && !tapped ? (
+          <View style={styles.selectBar}>
+            {selection.words > 5 ? (
+              <Text style={styles.selectHint}>Выделено {selection.words} слов — словарь переводит до 5</Text>
+            ) : (
+              <Pressable style={styles.selectBtn} onPress={() => inject('window.__translateSelection()')}>
+                <Text style={styles.selectBtnText} numberOfLines={1}>Перевести: «{selection.text}»</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => inject('window.__clearSelection()')} hitSlop={10} style={styles.selectClose}>
+              <Text style={styles.selectCloseText}>✕</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {controls ? (
           <View style={[styles.controls, panelBg]}>
             <View style={styles.controlsRow}>
@@ -315,6 +335,14 @@ const styles = StyleSheet.create({
   web: { flex: 1, backgroundColor: '#fff' },
   overlay: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', gap: 12 },
   overlayText: { color: '#666' },
+  selectBar: {
+    position: 'absolute', left: 12, right: 12, bottom: 16, flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  selectBtn: { flex: 1, backgroundColor: '#2f6fed', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  selectBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  selectHint: { flex: 1, color: '#fff', backgroundColor: '#a33', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 14, fontWeight: '600' },
+  selectClose: { backgroundColor: 'rgba(0,0,0,0.55)', width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  selectCloseText: { color: '#fff', fontWeight: '700' },
   controls: {
     position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 8,
     borderTopLeftRadius: 16, borderTopRightRadius: 16, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: -2 },

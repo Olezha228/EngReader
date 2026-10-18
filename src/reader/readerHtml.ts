@@ -5,6 +5,7 @@
 //   {type:'relocated', cfi, percent}        — позиция чтения
 //   {type:'tap'}                            — одиночный тап по центру: показать/скрыть панель прогресса
 //   {type:'toc', items:[{label, href, depth}]} — оглавление книги
+//   {type:'selection', text, words}         — текущее выделение (пусто — снято); перевод по __translateSelection()
 //   {type:'word', word, sentence, prev, next, cfi, selection?} — ДВОЙНОЙ тап по слову или выделенная фраза (≤ 5 слов)
 //   {type:'too_long', words}                — выделено больше 5 слов
 //   {type:'miss'}                           — тап не по тексту
@@ -155,36 +156,51 @@ export const readerHtml = `<!DOCTYPE html>
     post({ type: 'word', word: w.word, sentence: ctx.sentence, prev: ctx.prev, next: ctx.next, cfi: cfi });
   }
 
-  // Выделение пальцем (долгое нажатие + ручки): ждём, пока оно устоится, и отдаём фразу до 5 слов.
-  var selTimer = null, lastSelection = '';
+  // Выделение пальцем (долгое нажатие + ручки). Пока оно есть, RN показывает кнопку «Перевести: …»;
+  // карточка открывается только по ней (__translateSelection), а не сама по таймеру.
+  var selTimer = null, lastSelection = '', selContents = null;
+  function snappedRange(doc) {
+    var sel = doc.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+    var range = sel.getRangeAt(0).cloneRange();
+    // Ручки часто останавливаются посреди слова — раздвигаем копию диапазона до границ слов.
+    try {
+      var sc = range.startContainer, ec = range.endContainer;
+      if (sc.nodeType === 3) range.setStart(sc, expandWord(sc.textContent || '', range.startOffset).start);
+      if (ec.nodeType === 3) range.setEnd(ec, expandWord(ec.textContent || '', Math.max(0, range.endOffset - 1)).end);
+    } catch (e) {}
+    return range;
+  }
   function watchSelection(contents) {
     var doc = contents.document;
     try { doc.body.style.webkitTouchCallout = 'none'; } catch (e) {}
     doc.addEventListener('selectionchange', function () {
       if (selTimer) clearTimeout(selTimer);
       selTimer = setTimeout(function () {
-        var sel = doc.getSelection();
-        if (!sel || sel.isCollapsed || sel.rangeCount === 0) { lastSelection = ''; return; }
-        var range = sel.getRangeAt(0);
-        // Ручки выделения часто останавливаются посреди слова — раздвигаем до границ слов.
-        try {
-          var sc = range.startContainer, ec = range.endContainer;
-          if (sc.nodeType === 3) range.setStart(sc, expandWord(sc.textContent || '', range.startOffset).start);
-          if (ec.nodeType === 3) range.setEnd(ec, expandWord(ec.textContent || '', Math.max(0, range.endOffset - 1)).end);
-        } catch (e) {}
-        var text = range.toString().replace(/\\s+/g, ' ').trim();
-        if (!text || text === lastSelection) return;
+        var range = snappedRange(doc);
+        var text = range ? range.toString().replace(/\\s+/g, ' ').trim() : '';
+        if (text === lastSelection) return;
         lastSelection = text;
-        var words = text.split(' ').filter(Boolean);
-        if (words.length > 5) { post({ type: 'too_long', words: words.length }); return; }
-        var cfi = '';
-        try { cfi = contents.cfiFromRange(range); } catch (e) {}
-        var node = range.startContainer.nodeType === 3 ? range.startContainer : range.startContainer.firstChild || range.startContainer;
-        var ctx = contextAt(blockOf(node), node, range.startOffset, text.length);
-        post({ type: 'word', word: text, sentence: ctx.sentence, prev: '', next: '', cfi: cfi, selection: true });
-      }, 700);
+        selContents = text ? contents : null;
+        post({ type: 'selection', text: text, words: text ? text.split(' ').filter(Boolean).length : 0 });
+      }, 250);
     });
   }
+  window.__translateSelection = function () {
+    var contents = selContents;
+    if (!contents) return;
+    var doc = contents.document;
+    var range = snappedRange(doc);
+    if (!range) return;
+    var text = range.toString().replace(/\\s+/g, ' ').trim();
+    var words = text.split(' ').filter(Boolean);
+    if (words.length > 5) { post({ type: 'too_long', words: words.length }); return; }
+    var cfi = '';
+    try { cfi = contents.cfiFromRange(range); } catch (e) {}
+    var node = range.startContainer.nodeType === 3 ? range.startContainer : range.startContainer.firstChild || range.startContainer;
+    var ctx = contextAt(blockOf(node), node, range.startOffset, text.length);
+    post({ type: 'word', word: text, sentence: ctx.sentence, prev: '', next: '', cfi: cfi, selection: true });
+  };
 
   var lastTap = null, singleTapTimer = null;
 
@@ -323,6 +339,8 @@ export const readerHtml = `<!DOCTYPE html>
   };
   window.__clearSelection = function () {
     lastSelection = '';
+    selContents = null;
+    post({ type: 'selection', text: '', words: 0 });
     if (!rendition) return;
     rendition.getContents().forEach(function (c) {
       try { var s = c.window.getSelection(); if (s) s.removeAllRanges(); } catch (e) {}
