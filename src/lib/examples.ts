@@ -17,7 +17,7 @@ export interface ExamplesProvider {
 
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_EXAMPLES = 5;
-const TIMEOUT_MS = 6000;
+const TIMEOUT_MS = 12000; // Tatoeba из России отвечает медленно; идёт параллельно с Reverso, поэтому ждать не жалко
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   const controller = new AbortController();
