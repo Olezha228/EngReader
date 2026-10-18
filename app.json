@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "EngReader",
-    "slug": "engreader",
+    "slug": "engreeader",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -43,6 +43,11 @@
       "expo-web-browser",
       "expo-asset",
       "expo-sharing"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1974fa88-b8e2-4e66-874d-467318d726ad"
+      }
+    }
   }
 }
