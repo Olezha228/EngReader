@@ -178,27 +178,16 @@ export const readerHtml = `<!DOCTYPE html>
     });
   }
 
-  // Диагностика касаний: куда они приходят — во внешнюю страницу или в iframe главы.
-  var touchDiag = 0;
-  document.addEventListener('touchstart', function (e) {
-    if (touchDiag++ < 3) post({ type: 'debug', msg: 'outer touchstart target=' + (e.target && e.target.tagName) + ' at ' + Math.round(e.touches[0].clientX) + ',' + Math.round(e.touches[0].clientY) });
-  }, { passive: true, capture: true });
-  document.addEventListener('pointerdown', function (e) {
-    if (touchDiag++ < 6) post({ type: 'debug', msg: 'outer pointerdown target=' + (e.target && e.target.tagName) });
-  }, { passive: true, capture: true });
+  function frameOf(doc) {
+    var frames = document.querySelectorAll('iframe');
+    for (var i = 0; i < frames.length; i++) { try { if (frames[i].contentDocument === doc) return frames[i]; } catch (e) {} }
+    return frames[0] || null;
+  }
 
   // Вешаем жесты на документ каждой главы (iframe epub.js).
   function attach(contents) {
     var doc = contents.document;
     var start = null;
-    post({ type: 'debug', msg: 'attach hook: doc=' + (doc && doc.readyState) + ' sameDoc=' + (document.querySelector('iframe') && document.querySelector('iframe').contentDocument === doc) });
-    ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'click'].forEach(function (ev) {
-      doc.addEventListener(ev, function (e) { if (touchDiag++ < 12) post({ type: 'debug', msg: 'iframe ' + ev + ' target=' + (e.target && e.target.tagName) }); }, { passive: true, capture: true });
-    });
-    try {
-      var ifr = document.querySelector('iframe');
-      post({ type: 'debug', msg: 'iframe attrs: sandbox=' + ifr.getAttribute('sandbox') + ' pe=' + getComputedStyle(ifr).pointerEvents + ' z=' + getComputedStyle(ifr).zIndex + ' topEl=' + (document.elementFromPoint(200, 300) && document.elementFromPoint(200, 300).tagName) });
-    } catch (e) {}
     highlightKnown(doc);
     watchSelection(contents);
     doc.addEventListener('touchstart', function (e) {
@@ -210,13 +199,24 @@ export const readerHtml = `<!DOCTYPE html>
       var t = e.changedTouches[0];
       var dx = t.clientX - start.x, dy = t.clientY - start.y, dt = Date.now() - start.t;
       start = null;
+      var isTap = dt < 500 && Math.abs(dx) < 12 && Math.abs(dy) < 12;
       var sel = doc.getSelection();
-      if (sel && !sel.isCollapsed) return; // идёт выделение фразы — не листаем и не ищем слово под пальцем
+      if (sel && !sel.isCollapsed) {
+        // Есть выделение фразы: свайп/движение — не трогаем (идёт работа с ручками); короткий тап снимает его.
+        if (!isTap) return;
+        sel.removeAllRanges();
+        lastSelection = '';
+      }
       if (Math.abs(dx) > 60 && Math.abs(dy) < 80) { if (dx < 0) rendition.next(); else rendition.prev(); return; }
-      if (dt < 350 && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-        var W = doc.documentElement.clientWidth;
-        if (t.clientX < W * 0.12) { rendition.prev(); return; }
-        if (t.clientX > W * 0.88) { rendition.next(); return; }
+      if (isTap) {
+        // Документ главы в paginated-режиме шириной во все её страницы, поэтому края считаем
+        // в ЭКРАННЫХ координатах: позиция iframe на экране + позиция тапа внутри него.
+        var ifr = frameOf(doc);
+        var left = ifr ? ifr.getBoundingClientRect().left : 0;
+        var sx = left + t.clientX;
+        var W = window.innerWidth || document.documentElement.clientWidth;
+        if (sx < W * 0.1) { rendition.prev(); return; }
+        if (sx > W * 0.9) { rendition.next(); return; }
         handleTap(contents, t.clientX, t.clientY);
       }
     }, { passive: true });
@@ -246,24 +246,10 @@ export const readerHtml = `<!DOCTYPE html>
       rendition.on('relocated', function (loc) {
         post({ type: 'relocated', cfi: loc.start.cfi, percent: loc.start.percentage || 0 });
       });
-      rendition.on('rendered', function (section, view) {
-        var v = document.getElementById('viewer');
-        var info = 'rendered ' + (section && section.href) + ' viewer=' + v.clientWidth + 'x' + v.clientHeight + ' iframes=' + document.querySelectorAll('iframe').length;
-        try {
-          var f = document.querySelector('iframe');
-          var r = f.getBoundingClientRect();
-          var cs = getComputedStyle(f);
-          var wrap = f.parentElement; var wr = wrap.getBoundingClientRect();
-          var doc = f.contentDocument;
-          var body = doc && doc.body;
-          var bcs = body && doc.defaultView.getComputedStyle(body);
-          info += ' | iframe rect=' + Math.round(r.x) + ',' + Math.round(r.y) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)
-            + ' vis=' + cs.visibility + ' op=' + cs.opacity + ' disp=' + cs.display
-            + ' | wrap=' + Math.round(wr.x) + ',' + Math.round(wr.y) + ' ' + Math.round(wr.width) + 'x' + Math.round(wr.height) + ' wrapVis=' + getComputedStyle(wrap).visibility
-            + ' | body text=' + (body ? (body.innerText || '').trim().length : -1) + ' color=' + (bcs && bcs.color) + ' bg=' + (bcs && bcs.backgroundColor)
-            + ' bodyW=' + (body && body.scrollWidth) + ' cols=' + (bcs && bcs.columnWidth) + ' | container scrollLeft=' + (v.firstElementChild && v.firstElementChild.scrollLeft);
-        } catch (e) { info += ' | diag error: ' + e; }
-        post({ type: 'debug', msg: info });
+      rendition.on('rendered', function (section) {
+        var f = document.querySelector('iframe');
+        var body = f && f.contentDocument && f.contentDocument.body;
+        post({ type: 'debug', msg: 'rendered ' + (section && section.href) + ' text=' + (body ? (body.innerText || '').trim().length : -1) });
       });
       rendition.on('displayError', function (e) { post({ type: 'error', message: 'displayError: ' + String(e) }); });
       book.opened.then(function () { post({ type: 'debug', msg: 'opened, spine=' + (book.spine && book.spine.length) }); })

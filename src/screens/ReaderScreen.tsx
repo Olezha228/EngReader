@@ -66,7 +66,9 @@ export function ReaderScreen({ book, onBack }: Props) {
   const onMessage = useCallback(async (event: WebViewMessageEvent) => {
     let msg: Msg;
     try { msg = JSON.parse(event.nativeEvent.data) as Msg; } catch { return; }
-    if (msg.type !== 'relocated') console.log('[reader]', msg.type, 'msg' in msg ? msg.msg : 'message' in msg ? msg.message : '');
+    if (msg.type !== 'relocated') {
+      console.log('[reader]', msg.type, 'msg' in msg ? msg.msg : 'message' in msg ? msg.message : 'word' in msg ? `«${msg.word}»` : '');
+    }
     switch (msg.type) {
       case 'loaded':
         void openBook();
@@ -142,11 +144,7 @@ export function ReaderScreen({ book, onBack }: Props) {
         <Pressable onPress={() => changeFont(-10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A−</Text></Pressable>
         <Pressable onPress={() => changeFont(10)} hitSlop={8}><Text style={[styles.fontBtn, fg]}>A+</Text></Pressable>
       </View>
-      <View
-        style={styles.webWrap}
-        onTouchStart={(e) => console.log('[reader] rn touchstart', Math.round(e.nativeEvent.locationX), Math.round(e.nativeEvent.locationY))}
-        onTouchEnd={(e) => console.log('[reader] rn touchend', Math.round(e.nativeEvent.locationX), Math.round(e.nativeEvent.locationY))}
-      >
+      <View style={styles.webWrap}>
         <WebView
           ref={webRef}
           source={{ html: readerHtml }}
