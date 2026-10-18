@@ -22,7 +22,7 @@
           }
         ],
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true
+        "LSSupportsOpeningDocumentsInPlace": false
       }
     },
     "android": {

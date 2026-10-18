@@ -86,6 +86,26 @@ async function entryIdsByLemma(db: SQLiteDatabase, lemma: string): Promise<numbe
   return rows.map((r) => r.id);
 }
 
+/** Выделенная фраза: ищем целиком (фразовые глаголы, устойчивые сочетания), иначе — первое значимое слово. */
+export async function resolvePhrase(db: SQLiteDatabase, raw: string): Promise<Resolved> {
+  const words = raw.replace(/\s+/g, ' ').trim().split(' ');
+  if (words.length <= 1) return resolveWord(db, raw);
+  const phrase = words.map(normalizeWord).filter(Boolean).join(' ');
+  const ids: number[] = [];
+  const hit = await db.getFirstAsync<{ entry_id: number }>('SELECT entry_id FROM dict_phrasals WHERE phrase = ?', phrase);
+  if (hit) ids.push(hit.entry_id);
+  for (const e of await entryIdsByLemma(db, phrase)) if (!ids.includes(e)) ids.push(e);
+  if (ids.length > 0) {
+    const entries = await loadEntries(db, ids);
+    return { form: raw, normalized: phrase, headword: phrase, entries, maybeProperNoun: false };
+  }
+  // Фразы нет в словаре — переводим первое слово, которое не служебное, с учётом соседа.
+  const STOP = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'on', 'at', 'and', 'or', 'is', 'are', 'was', 'were', 'be', 'it', 'he', 'she', 'they', 'we', 'i', 'you']);
+  const idx = Math.max(0, words.findIndex((w) => !STOP.has(normalizeWord(w))));
+  const first = await resolveWord(db, words[idx], { prev: words[idx - 1], next: words[idx + 1] });
+  return { ...first, form: raw, headword: first.entries.length ? first.headword : phrase };
+}
+
 export async function resolveWord(
   db: SQLiteDatabase,
   raw: string,

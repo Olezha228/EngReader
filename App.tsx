@@ -1,11 +1,11 @@
 // Корень приложения: БД с миграциями + простая навигация по трём экранам.
 // Expo Router подключим на этапе разрастания экранов (T-3.3), для скелета хватает состояния.
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { migrate } from './src/db/schema';
-import type { Book } from './src/lib/books';
+import { fileNameFromUri, getBook, importBookFromUri, isEpubUri, type Book } from './src/lib/books';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { CardsScreen } from './src/screens/CardsScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
@@ -26,6 +26,24 @@ function Root() {
   }, [db]);
 
   useEffect(() => { void refreshCount(); }, [refreshCount, route]);
+
+  // «Открыть в EngReader» из «Файлов», почты, Safari: iOS передаёт file:// на копию в Documents/Inbox.
+  const openIncoming = useCallback(async (url: string | null | undefined) => {
+    if (!url || !isEpubUri(url)) return;
+    try {
+      const id = await importBookFromUri(db, url, fileNameFromUri(url), { move: true });
+      const book = await getBook(db, id);
+      if (book) setRoute({ name: 'reader', book });
+    } catch (e) {
+      Alert.alert('Не удалось открыть файл', String(e instanceof Error ? e.message : e));
+    }
+  }, [db]);
+
+  useEffect(() => {
+    Linking.getInitialURL().then(openIncoming).catch(() => undefined);
+    const sub = Linking.addEventListener('url', ({ url }) => void openIncoming(url));
+    return () => sub.remove();
+  }, [openIncoming]);
 
   switch (route.name) {
     case 'reader':

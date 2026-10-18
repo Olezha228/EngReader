@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS vocab (
   added_at INTEGER NOT NULL,
   seen_count INTEGER NOT NULL DEFAULT 1,
   is_leech INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
   UNIQUE(lemma, pos)
 );
 CREATE TABLE IF NOT EXISTS vocab_contexts (

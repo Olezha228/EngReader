@@ -58,12 +58,56 @@ export async function pickAndImportBook(db: SQLiteDatabase): Promise<number | nu
   return importBookFromUri(db, asset.uri, asset.name);
 }
 
-export async function importBookFromUri(db: SQLiteDatabase, uri: string, name: string): Promise<number> {
+export async function importBookFromUri(
+  db: SQLiteDatabase, uri: string, name: string, opts: { move?: boolean } = {},
+): Promise<number> {
   const src = new File(uri);
+  if (!src.exists) throw new Error(`Файл не найден: ${name}`);
   const dest = new File(booksDir(), `${Date.now()}-${safeName(name)}`);
   await src.copy(dest);
+  if (opts.move) { try { src.delete(); } catch { /* Inbox может быть уже очищен системой */ } }
   const title = name.replace(/\.epub$/i, '').replace(/[_-]+/g, ' ');
   return insertBook(db, title, dest.uri, 'import');
+}
+
+export function isEpubUri(uri: string): boolean {
+  return /^file:/i.test(uri) && /\.epub(\?.*)?$/i.test(uri);
+}
+
+export function fileNameFromUri(uri: string): string {
+  const last = uri.split('?')[0].split('/').pop() ?? 'book.epub';
+  try { return decodeURIComponent(last); } catch { return last; }
+}
+
+/**
+ * Книги, попавшие в Documents напрямую: через «Открыть в EngReader» (iOS кладёт в Documents/Inbox)
+ * или перетаскиванием в папку приложения в «Файлах» (UIFileSharingEnabled). Переносим в books/ и регистрируем.
+ */
+export async function importLooseFiles(db: SQLiteDatabase): Promise<number> {
+  let imported = 0;
+  const roots = [Paths.document, new Directory(Paths.document, 'Inbox')];
+  for (const dir of roots) {
+    if (!dir.exists) continue;
+    let entries: (File | Directory)[] = [];
+    try { entries = dir.list(); } catch { continue; }
+    for (const entry of entries) {
+      if (!(entry instanceof File) || !/\.epub$/i.test(entry.name)) continue;
+      try {
+        await importBookFromUri(db, entry.uri, entry.name, { move: true });
+        imported += 1;
+      } catch (e) {
+        console.warn('[books] loose import failed', entry.name, e);
+      }
+    }
+  }
+  return imported;
+}
+
+export async function getBook(db: SQLiteDatabase, id: number): Promise<Book | null> {
+  return db.getFirstAsync<Book>(
+    `SELECT b.*, COALESCE(r.percent, 0) AS percent FROM books b LEFT JOIN reading_state r ON r.book_id = b.id WHERE b.id = ?`,
+    id,
+  );
 }
 
 /** Тестовая книга (Project Gutenberg, public domain) — кладётся один раз при первом запуске. */

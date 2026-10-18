@@ -3,9 +3,10 @@
 //   {type:'loaded'}                         — страница готова принимать __openBook
 //   {type:'ready', title}                   — книга распакована, locations посчитаны
 //   {type:'relocated', cfi, percent}        — позиция чтения
-//   {type:'word', word, sentence, prev, next, cfi} — тап по слову
+//   {type:'word', word, sentence, prev, next, cfi, selection?} — тап по слову или выделенная фраза (≤ 5 слов)
+//   {type:'too_long', words}                — выделено больше 5 слов
 //   {type:'miss'}                           — тап не по тексту
-//   {type:'error', message}
+//   {type:'error', message, code?}          — code 'drm' — книга зашифрована
 // Команды из RN: window.__openBook(base64, cfi, {fontSize, theme, known}), __next(), __prev(),
 //   __setFontSize(percent), __setTheme('light'|'sepia'|'dark'), __setKnown(string[])
 import { EPUBJS, JSZIP } from './vendor.generated';
@@ -16,7 +17,7 @@ export const readerHtml = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fff; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fff; -webkit-touch-callout: none; }
   #viewer { width: 100%; height: 100%; }
 </style>
 </head>
@@ -145,11 +146,37 @@ export const readerHtml = `<!DOCTYPE html>
     post({ type: 'word', word: w.word, sentence: ctx.sentence, prev: ctx.prev, next: ctx.next, cfi: cfi });
   }
 
+  // Выделение пальцем (долгое нажатие + ручки): ждём, пока оно устоится, и отдаём фразу до 5 слов.
+  var selTimer = null, lastSelection = '';
+  function watchSelection(contents) {
+    var doc = contents.document;
+    try { doc.body.style.webkitTouchCallout = 'none'; } catch (e) {}
+    doc.addEventListener('selectionchange', function () {
+      if (selTimer) clearTimeout(selTimer);
+      selTimer = setTimeout(function () {
+        var sel = doc.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) { lastSelection = ''; return; }
+        var text = sel.toString().replace(/\\s+/g, ' ').trim();
+        if (!text || text === lastSelection) return;
+        lastSelection = text;
+        var words = text.split(' ').filter(Boolean);
+        if (words.length > 5) { post({ type: 'too_long', words: words.length }); return; }
+        var range = sel.getRangeAt(0);
+        var cfi = '';
+        try { cfi = contents.cfiFromRange(range); } catch (e) {}
+        var node = range.startContainer.nodeType === 3 ? range.startContainer : range.startContainer.firstChild || range.startContainer;
+        var ctx = contextAt(blockOf(node), node, range.startOffset, text.length);
+        post({ type: 'word', word: text, sentence: ctx.sentence, prev: '', next: '', cfi: cfi, selection: true });
+      }, 700);
+    });
+  }
+
   // Вешаем жесты на документ каждой главы (iframe epub.js).
   function attach(contents) {
     var doc = contents.document;
     var start = null;
     highlightKnown(doc);
+    watchSelection(contents);
     doc.addEventListener('touchstart', function (e) {
       var t = e.touches[0];
       start = { x: t.clientX, y: t.clientY, t: Date.now() };
@@ -159,6 +186,8 @@ export const readerHtml = `<!DOCTYPE html>
       var t = e.changedTouches[0];
       var dx = t.clientX - start.x, dy = t.clientY - start.y, dt = Date.now() - start.t;
       start = null;
+      var sel = doc.getSelection();
+      if (sel && !sel.isCollapsed) return; // идёт выделение фразы — не листаем и не ищем слово под пальцем
       if (Math.abs(dx) > 60 && Math.abs(dy) < 80) { if (dx < 0) rendition.next(); else rendition.prev(); return; }
       if (dt < 350 && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
         var W = doc.documentElement.clientWidth;
@@ -192,12 +221,20 @@ export const readerHtml = `<!DOCTYPE html>
         post({ type: 'relocated', cfi: loc.start.cfi, percent: loc.start.percentage || 0 });
       });
       book.ready
-        .then(function () { return book.locations.generate(1200); })
+        .then(function () {
+          // Книга с DRM: в архиве лежит META-INF/encryption.xml — текст зашифрован, читать нечего.
+          var zip = book.archive && book.archive.zip;
+          if (zip && zip.file('META-INF/encryption.xml')) {
+            post({ type: 'error', code: 'drm', message: 'DRM' });
+            throw new Error('drm');
+          }
+          return book.locations.generate(1200);
+        })
         .then(function () {
           var meta = book.packaging && book.packaging.metadata;
           post({ type: 'ready', title: (meta && meta.title) || '', author: (meta && meta.creator) || '' });
         })
-        .catch(function (e) { post({ type: 'error', message: String(e) }); });
+        .catch(function (e) { if (String(e).indexOf('drm') < 0) post({ type: 'error', message: String(e) }); });
       rendition.display(cfi || undefined).catch(function (e) { post({ type: 'error', message: String(e) }); });
     } catch (e) {
       post({ type: 'error', message: String(e) });

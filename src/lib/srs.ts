@@ -40,6 +40,7 @@ export type QueueItem = CardRow & {
   ipa: string | null;
   translations_json: string;
   is_leech: number;
+  note: string | null;
   form: string | null;
   sentence: string | null;
 };
@@ -109,6 +110,11 @@ export async function getNewPerDay(db: SQLiteDatabase): Promise<number> {
   return Number.isFinite(n) && n >= 0 ? n : NEW_PER_DAY_DEFAULT;
 }
 
+export async function setNewPerDay(db: SQLiteDatabase, n: number): Promise<void> {
+  const v = Math.max(0, Math.min(200, Math.round(n)));
+  await db.runAsync("INSERT OR REPLACE INTO settings (key, value) VALUES ('new_per_day', ?)", String(v));
+}
+
 /** Создаёт карточку для слова словаря, если её ещё нет. */
 export async function ensureCard(db: SQLiteDatabase, vocabId: number, contextId: number | null, now: Date = new Date()): Promise<void> {
   const card = createEmptyCard(now);
@@ -122,7 +128,7 @@ export async function ensureCard(db: SQLiteDatabase, vocabId: number, contextId:
 }
 
 const QUEUE_SELECT = `
-  SELECT c.*, v.lemma, v.pos, v.ipa, v.translations_json, v.is_leech,
+  SELECT c.*, v.lemma, v.pos, v.ipa, v.translations_json, v.is_leech, v.note,
          COALESCE(ctx.form, fc.form) AS form, COALESCE(ctx.sentence, fc.sentence) AS sentence
     FROM cards c
     JOIN vocab v ON v.id = c.vocab_id

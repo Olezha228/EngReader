@@ -11,8 +11,15 @@ export type VocabItem = {
   ipa: string | null;
   added_at: number;
   seen_count: number;
+  is_leech: number;
+  note: string | null;
   contexts: number;
 };
+
+/** Своя подсказка или пример — показывается на лицевой стороне карточки (прежде всего для «сложных»). */
+export async function setVocabNote(db: SQLiteDatabase, id: number, note: string): Promise<void> {
+  await db.runAsync('UPDATE vocab SET note = ? WHERE id = ?', note.trim() || null, id);
+}
 
 export type VocabStatus = { id: number; seen_count: number } | null;
 

@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Tex
 import * as Speech from 'expo-speech';
 import { useSQLiteContext } from 'expo-sqlite';
 import {
-  blankOut, getQueue, getStats, previewIntervals, rateCard, Rating,
+  blankOut, getQueue, getStats, previewIntervals, rateCard, Rating, setNewPerDay,
   type Grade, type Queue, type QueueItem, type Stats,
 } from '../lib/srs';
 
@@ -92,7 +92,11 @@ export function CardsScreen({ onBack }: Props) {
           ) : (
             <Text style={styles.muted}>Очередь пуста. Добавляйте слова из книги — они появятся здесь.</Text>
           )}
-          <Text style={styles.hintSmall}>лимит новых в день: {queue.newLimit}</Text>
+          <View style={styles.limitRow}>
+            <Text style={styles.hintSmall}>лимит новых в день: {queue.newLimit}</Text>
+            <Pressable hitSlop={8} onPress={() => setNewPerDay(db, queue.newLimit - 5).then(load)}><Text style={styles.limitBtn}>−</Text></Pressable>
+            <Pressable hitSlop={8} onPress={() => setNewPerDay(db, queue.newLimit + 5).then(load)}><Text style={styles.limitBtn}>+</Text></Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -111,6 +115,7 @@ export function CardsScreen({ onBack }: Props) {
               <Text style={styles.hint}>
                 {front.blanked ? `${current.pos ? current.pos + ' · ' : ''}${translations[0] ?? 'вспомните слово'}` : 'Что это слово значит?'}
               </Text>
+              {current.note ? <Text style={styles.note}>Подсказка: {current.note}</Text> : null}
               <Pressable style={styles.primary} onPress={() => { setRevealed(true); speak(current.lemma); }}>
                 <Text style={styles.primaryText}>Показать ответ</Text>
               </Pressable>
@@ -167,7 +172,10 @@ const styles = StyleSheet.create({
   big: { fontSize: 24, fontWeight: '700' },
   line: { fontSize: 17 },
   muted: { color: '#777', textAlign: 'center' },
-  hintSmall: { color: '#aaa', fontSize: 12, marginTop: 12 },
+  hintSmall: { color: '#aaa', fontSize: 12 },
+  limitRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12 },
+  limitBtn: { color: '#2f6fed', fontSize: 20, fontWeight: '700' },
+  note: { color: '#8a6d3b', fontSize: 15 },
   primary: { backgroundColor: '#2f6fed', paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, marginTop: 8 },
   primaryText: { color: '#fff', fontWeight: '700', fontSize: 16, textAlign: 'center' },
   card: { padding: 20, gap: 16 },

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
-import { deleteBook, ensureSampleBook, listBooks, pickAndImportBook, type Book } from '../lib/books';
+import { deleteBook, ensureSampleBook, importLooseFiles, listBooks, pickAndImportBook, type Book } from '../lib/books';
 
 type Props = {
   onOpen: (book: Book) => void; onVocab: () => void; onCards: () => void; onAbout: () => void; vocabCount: number;
@@ -16,7 +16,11 @@ export function LibraryScreen({ onOpen, onVocab, onCards, onAbout, vocabCount }:
   const refresh = useCallback(async () => setBooks(await listBooks(db)), [db]);
 
   useEffect(() => {
-    ensureSampleBook(db).catch((e) => console.warn('sample book', e)).finally(() => void refresh());
+    (async () => {
+      try { await ensureSampleBook(db); } catch (e) { console.warn('sample book', e); }
+      try { await importLooseFiles(db); } catch (e) { console.warn('loose files', e); }
+      await refresh();
+    })();
   }, [db, refresh]);
 
   const onAdd = async () => {

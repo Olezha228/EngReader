@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test -- --ci
+      - name: Словарь на месте и не пустой
+        run: test -s assets/dict/dict.db && python3 -I -c "import sqlite3; n=sqlite3.connect('assets/dict/dict.db').execute('select count(*) from dict_entries').fetchone()[0]; assert n>50000, n; print('dict entries', n)"

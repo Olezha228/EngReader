@@ -5,7 +5,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Speech from 'expo-speech';
 import { useSQLiteContext } from 'expo-sqlite';
-import { deleteVocab, exportVocabCsv, listVocab, type VocabItem } from '../lib/vocab';
+import { deleteVocab, exportVocabCsv, listVocab, setVocabNote, type VocabItem } from '../lib/vocab';
 
 type Props = { onBack: () => void; onChanged: () => void };
 
@@ -21,6 +21,20 @@ export function VocabScreen({ onBack, onChanged }: Props) {
       { text: 'Отмена', style: 'cancel' },
       { text: 'Удалить', style: 'destructive', onPress: () => deleteVocab(db, item.id).then(refresh).then(onChanged) },
     ]);
+  };
+
+  // Своя подсказка/пример (US-3.3): показывается на лицевой стороне карточки. Alert.prompt — iOS.
+  const onNote = (item: VocabItem) => {
+    Alert.prompt(
+      `Подсказка для «${item.lemma}»`,
+      'Свой пример, ассоциация или перевод — увидите на карточке до ответа',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Сохранить', onPress: (text?: string) => setVocabNote(db, item.id, text ?? '').then(refresh) },
+      ],
+      'plain-text',
+      item.note ?? '',
+    );
   };
 
   // Экспорт CSV (открывается в Anki, Numbers, Excel) — страховка от потери данных: всё хранится только на телефоне.
@@ -52,13 +66,19 @@ export function VocabScreen({ onBack, onChanged }: Props) {
         keyExtractor={(i) => String(i.id)}
         contentContainerStyle={styles.list}
         ListEmptyComponent={<Text style={styles.empty}>Пусто. Тапните слово в книге и нажмите «В словарь».</Text>}
+        ListHeaderComponent={items.length ? <Text style={styles.listHint}>нажатие — подсказка для карточки · долгое — удалить</Text> : undefined}
         renderItem={({ item }) => {
           const translations = (JSON.parse(item.translations_json) as string[]).slice(0, 3).join('; ');
           return (
-            <Pressable style={styles.row} onLongPress={() => onDelete(item)} onPress={() => Speech.speak(item.lemma, { language: 'en-US' })}>
+            <Pressable style={[styles.row, item.is_leech ? styles.rowLeech : null]} onLongPress={() => onDelete(item)} onPress={() => onNote(item)}>
+              <Pressable onPress={() => Speech.speak(item.lemma, { language: 'en-US' })} hitSlop={6}>
+                <Text style={styles.speaker}>🔊</Text>
+              </Pressable>
               <View style={{ flex: 1 }}>
                 <Text style={styles.lemma}>{item.lemma} {item.ipa ? <Text style={styles.ipa}>/{item.ipa}/</Text> : null}</Text>
                 <Text style={styles.ru}>{translations || '— без перевода —'}</Text>
+                {item.note ? <Text style={styles.note}>✎ {item.note}</Text> : null}
+                {item.is_leech && !item.note ? <Text style={styles.leechHint}>сложное слово — нажмите, чтобы добавить подсказку</Text> : null}
               </View>
               <Text style={styles.meta}>×{item.seen_count}{'\n'}{item.contexts} контекст</Text>
             </Pressable>
@@ -78,7 +98,12 @@ const styles = StyleSheet.create({
   exportText: { fontWeight: '600' },
   list: { paddingHorizontal: 16, gap: 8, paddingBottom: 24 },
   empty: { color: '#777', textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
+  listHint: { color: '#aaa', fontSize: 12, marginBottom: 4 },
   row: { flexDirection: 'row', gap: 12, padding: 12, borderRadius: 12, backgroundColor: '#f6f7f9', alignItems: 'center' },
+  rowLeech: { borderLeftWidth: 3, borderLeftColor: '#d9534f' },
+  speaker: { fontSize: 18 },
+  note: { color: '#8a6d3b', marginTop: 4, fontSize: 13 },
+  leechHint: { color: '#a33', marginTop: 4, fontSize: 12 },
   lemma: { fontSize: 17, fontWeight: '600' },
   ipa: { fontSize: 13, color: '#666', fontWeight: '400' },
   ru: { color: '#333', marginTop: 2 },

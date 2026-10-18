@@ -8,7 +8,7 @@ import {
   getReadingState, readBookBase64, READER_THEMES, saveReadingState, updateBookMeta, type Book, type ReaderTheme,
 } from '../lib/books';
 import { knownWords } from '../lib/vocab';
-import { resolveWord } from '../lib/wordResolver';
+import { resolvePhrase, resolveWord } from '../lib/wordResolver';
 import { WordSheet, type TappedWord } from '../components/WordSheet';
 
 const THEME_LABEL: Record<ReaderTheme, string> = { light: 'Светлая', sepia: 'Сепия', dark: 'Тёмная' };
@@ -19,9 +19,10 @@ type Msg =
   | { type: 'loaded' }
   | { type: 'ready'; title: string; author: string }
   | { type: 'relocated'; cfi: string; percent: number }
-  | { type: 'word'; word: string; sentence: string; prev: string; next: string; cfi: string }
+  | { type: 'word'; word: string; sentence: string; prev: string; next: string; cfi: string; selection?: boolean }
+  | { type: 'too_long'; words: number }
   | { type: 'miss' }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; code?: string };
 
 type Props = { book: Book; onBack: () => void };
 
@@ -81,13 +82,23 @@ export function ReaderScreen({ book, onBack }: Props) {
         break;
       case 'word': {
         const sentenceStart = msg.sentence.replace(/^[^A-Za-z]+/, '').startsWith(msg.word.replace(/^[^A-Za-z]+/, ''));
-        const resolved = await resolveWord(db, msg.word, { prev: msg.prev, next: msg.next }, { sentenceStart });
+        const resolved = msg.selection || /\s/.test(msg.word.trim())
+          ? await resolvePhrase(db, msg.word)
+          : await resolveWord(db, msg.word, { prev: msg.prev, next: msg.next }, { sentenceStart });
         setTapped({ ...resolved, sentence: msg.sentence, cfi: msg.cfi, bookId: book.id });
         break;
       }
+      case 'too_long':
+        Alert.alert('Слишком длинно', `Выделено ${msg.words} слов. Словарь переводит до 5 слов — выделите короче.`);
+        break;
       case 'error':
         setStatus('error');
-        Alert.alert('Ошибка читалки', msg.message.includes('encrypt') ? 'Книга защищена DRM и не может быть открыта' : msg.message);
+        Alert.alert(
+          'Не удалось открыть книгу',
+          msg.code === 'drm' || /encrypt/i.test(msg.message)
+            ? 'Книга защищена DRM (куплена в Kindle, Apple Books, ЛитРес и т. п.) — такие файлы открыть нельзя.'
+            : `Файл повреждён или это не EPUB.\n${msg.message}`,
+        );
         break;
       default:
         break;
