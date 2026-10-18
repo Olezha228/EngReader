@@ -55,21 +55,40 @@ export async function pickAndImportBook(db: SQLiteDatabase): Promise<number | nu
   if (result.canceled) return null;
   const asset = result.assets[0];
   // iOS может отдать имя без расширения и без mimeType — проверяем содержимое: EPUB это zip (сигнатура PK\x03\x04).
+  console.log('[books] picked', { name: asset.name, mimeType: asset.mimeType, size: asset.size, uri: asset.uri });
   const looksEpub = /\.epub$/i.test(asset.name) || /\.epub$/i.test(asset.uri) || asset.mimeType === 'application/epub+zip';
-  if (!looksEpub && !(await isZipFile(asset.uri))) {
-    throw new Error(`Это не EPUB: «${asset.name}»${asset.mimeType ? ` (${asset.mimeType})` : ''}. Нужен файл .epub без DRM.`);
+  if (!looksEpub) {
+    const probe = await probeZip(asset.uri);
+    console.log('[books] probe', probe);
+    if (probe.kind === 'unreadable') {
+      throw new Error(`Не удалось прочитать «${asset.name}»: ${probe.error}. Если файл в iCloud — сначала скачайте его в «Файлах» (значок облака), затем выберите снова.`);
+    }
+    if (probe.kind === 'not-zip') {
+      const format = probe.head.startsWith('%PDF') ? 'PDF'
+        : /^<\?xml|<FictionBook/.test(probe.head) ? 'FB2'
+          : asset.mimeType || 'неизвестный формат';
+      throw new Error(
+        `«${asset.name}» — это ${format}, а не EPUB. Приложение читает только EPUB без DRM. ` +
+        `Найдите эту книгу в формате .epub или конвертируйте файл в Calibre (бесплатно, на компьютере).`,
+      );
+    }
   }
   const name = /\.epub$/i.test(asset.name) ? asset.name : `${asset.name.replace(/\.[^.]+$/, '') || 'book'}.epub`;
   return importBookFromUri(db, asset.uri, name);
 }
 
+type ZipProbe = { kind: 'zip' } | { kind: 'not-zip'; head: string } | { kind: 'unreadable'; error: string };
+
 /** Первые байты файла: zip начинается с «PK\x03\x04», в base64 это «UEsDBA». */
-async function isZipFile(uri: string): Promise<boolean> {
+async function probeZip(uri: string): Promise<ZipProbe> {
   try {
     const b64 = await new File(uri).base64();
-    return b64.startsWith('UEsDBA');
-  } catch {
-    return false;
+    if (b64.startsWith('UEsDBA')) return { kind: 'zip' };
+    let head = b64.slice(0, 12);
+    try { head = atob(b64.slice(0, 16)).replace(/[^\x20-\x7e]/g, '·'); } catch { /* оставим base64 */ }
+    return { kind: 'not-zip', head: `${head} (${b64.length ? Math.round((b64.length * 3) / 4) : 0} байт)` };
+  } catch (e) {
+    return { kind: 'unreadable', error: String(e instanceof Error ? e.message : e) };
   }
 }
 
