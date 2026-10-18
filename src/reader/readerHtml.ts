@@ -3,12 +3,14 @@
 //   {type:'loaded'}                         — страница готова принимать __openBook
 //   {type:'ready', title}                   — книга распакована, locations посчитаны
 //   {type:'relocated', cfi, percent}        — позиция чтения
-//   {type:'word', word, sentence, prev, next, cfi, selection?} — тап по слову или выделенная фраза (≤ 5 слов)
+//   {type:'tap'}                            — одиночный тап по центру: показать/скрыть панель прогресса
+//   {type:'toc', items:[{label, href, depth}]} — оглавление книги
+//   {type:'word', word, sentence, prev, next, cfi, selection?} — ДВОЙНОЙ тап по слову или выделенная фраза (≤ 5 слов)
 //   {type:'too_long', words}                — выделено больше 5 слов
 //   {type:'miss'}                           — тап не по тексту
 //   {type:'error', message, code?}          — code 'drm' — книга зашифрована
 // Команды из RN: window.__openBook(base64, cfi, {fontSize, theme, known}), __next(), __prev(),
-//   __setFontSize(percent), __setTheme('light'|'sepia'|'dark'), __setKnown(string[])
+//   __setFontSize(percent), __setTheme('light'|'sepia'|'dark'), __setKnown(string[]), __goTo(href), __goPercent(0..1)
 import { EPUBJS, JSZIP } from './vendor.generated';
 
 export const readerHtml = `<!DOCTYPE html>
@@ -184,6 +186,8 @@ export const readerHtml = `<!DOCTYPE html>
     });
   }
 
+  var lastTap = null, singleTapTimer = null;
+
   function frameOf(doc) {
     var frames = document.querySelectorAll('iframe');
     for (var i = 0; i < frames.length; i++) { try { if (frames[i].contentDocument === doc) return frames[i]; } catch (e) {} }
@@ -223,7 +227,18 @@ export const readerHtml = `<!DOCTYPE html>
         var W = window.innerWidth || document.documentElement.clientWidth;
         if (sx < W * 0.1) { rendition.prev(); return; }
         if (sx > W * 0.9) { rendition.next(); return; }
-        handleTap(contents, t.clientX, t.clientY);
+        // Двойной тап — слово; одиночный (после паузы) — панель прогресса и оглавления.
+        var now = Date.now();
+        if (lastTap && now - lastTap.t < 320 && Math.abs(t.clientX - lastTap.x) < 40 && Math.abs(t.clientY - lastTap.y) < 40) {
+          if (singleTapTimer) clearTimeout(singleTapTimer);
+          singleTapTimer = null;
+          lastTap = null;
+          handleTap(contents, t.clientX, t.clientY);
+          return;
+        }
+        lastTap = { t: now, x: t.clientX, y: t.clientY };
+        if (singleTapTimer) clearTimeout(singleTapTimer);
+        singleTapTimer = setTimeout(function () { singleTapTimer = null; lastTap = null; post({ type: 'tap' }); }, 320);
       }
     }, { passive: true });
     // Короткий тап по ссылке — перевод слова, а не переход.
@@ -250,8 +265,18 @@ export const readerHtml = `<!DOCTYPE html>
       rendition.themes.fontSize(fs + '%');
       rendition.hooks.content.register(attach);
       rendition.on('relocated', function (loc) {
-        post({ type: 'relocated', cfi: loc.start.cfi, percent: loc.start.percentage || 0 });
+        post({ type: 'relocated', cfi: loc.start.cfi, percent: loc.start.percentage || 0, href: loc.start.href || '' });
       });
+      book.loaded.navigation.then(function (nav) {
+        var items = [];
+        (function walk(list, depth) {
+          (list || []).forEach(function (it) {
+            items.push({ label: String(it.label || '').replace(/\\s+/g, ' ').trim(), href: it.href, depth: depth });
+            if (it.subitems && it.subitems.length) walk(it.subitems, depth + 1);
+          });
+        })(nav.toc || [], 0);
+        post({ type: 'toc', items: items });
+      }).catch(function () {});
       rendition.on('rendered', function (section) {
         var f = document.querySelector('iframe');
         var body = f && f.contentDocument && f.contentDocument.body;
@@ -284,6 +309,12 @@ export const readerHtml = `<!DOCTYPE html>
   };
   window.__next = function () { if (rendition) rendition.next(); };
   window.__prev = function () { if (rendition) rendition.prev(); };
+  window.__goTo = function (href) { if (rendition) rendition.display(href).catch(function (e) { post({ type: 'error', message: 'goTo: ' + e }); }); };
+  window.__goPercent = function (p) {
+    if (!book || !rendition) return;
+    var cfi = book.locations.cfiFromPercentage(Math.min(1, Math.max(0, p)));
+    if (cfi) rendition.display(cfi);
+  };
   window.__setFontSize = function (p) { if (rendition) rendition.themes.fontSize(p + '%'); };
   window.__setTheme = function (name) {
     var t = THEMES[name] || THEMES.light;
