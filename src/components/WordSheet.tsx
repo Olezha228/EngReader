@@ -1,6 +1,6 @@
 // Карточка слова снизу экрана. Две вкладки: «Перевод» (словарь, контекст, озвучка) и «Примеры» (Tatoeba).
 // Действия: «В словарь», «Свой перевод», Reverso в браузере, закрыть.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Speech from 'expo-speech';
 import * as WebBrowser from 'expo-web-browser';
@@ -45,32 +45,38 @@ export function WordSheet({ word, onClose, onChanged }: Props) {
     getVocabStatus(db, lemma, pos).then(setStatus).catch(() => setStatus(null));
   }, [db, word, lemma, pos]);
 
-  // Вкладка «Примеры»: Tatoeba (API) и Reverso (скрытый WebView) запрашиваются параллельно.
+  // Вкладка «Примеры»: Tatoeba (API) и Reverso (скрытый WebView) запрашиваются параллельно, один раз на слово.
+  // Запуск привязан к слову через ref, чтобы собственные setState не перезапускали эффект и не отменяли ответы.
+  const startedFor = useRef<TappedWord | null>(null);
   useEffect(() => {
-    if (tab !== 'examples' || !word || tatoeba.status !== 'idle') return;
-    let cancelled = false;
+    if (tab !== 'examples' || !word || startedFor.current === word) return;
+    startedFor.current = word;
+    const current = word;
+    const stillCurrent = () => startedFor.current === current;
     setTatoeba({ status: 'loading', items: [] });
-    getExamples(db, word.headword).then((res) => {
-      if (cancelled) return;
-      if (res.error && res.examples.length === 0) setTatoeba({ status: 'error', items: [], note: `Tatoeba не ответила: ${res.error.replace(/^Error:\s*/, '')}` });
-      else setTatoeba({ status: 'done', items: res.examples, note: res.examples.length ? (res.fromCache ? 'из кеша' : undefined) : 'в Tatoeba примеров нет' });
+    getExamples(db, current.headword).then((res) => {
+      if (!stillCurrent()) return;
+      if (res.error && res.examples.length === 0) setTatoeba({ status: 'error', items: [], note: `не ответила (${res.error.replace(/^Error:\s*/, '').slice(0, 60)})` });
+      else setTatoeba({ status: 'done', items: res.examples, note: res.examples.length ? (res.fromCache ? 'из кеша' : undefined) : 'примеров нет' });
     });
     if (REVERSO_SCRAPE_ENABLED) {
-      getCachedExamples(db, 'reverso', word.headword).then((cached) => {
-        if (cancelled) return;
-        setReverso(cached ? { status: 'done', items: cached, note: cached.length ? 'из кеша' : 'в Reverso примеров нет' } : { status: 'loading', items: [] });
+      setReverso({ status: 'loading', items: [] });
+      getCachedExamples(db, 'reverso', current.headword).then((cached) => {
+        if (!stillCurrent() || !cached) return;
+        setReverso({ status: 'done', items: cached, note: cached.length ? 'из кеша' : 'примеров нет' });
       });
     }
-    return () => { cancelled = true; };
-  }, [tab, word, tatoeba.status, db]);
+  }, [tab, word, db]);
+
+  useEffect(() => { if (!word) startedFor.current = null; }, [word]);
 
   const onReverso = (items: Example[], error?: string) => {
     if (!word) return;
     if (error && items.length === 0) {
-      setReverso({ status: 'error', items: [], note: error === 'cloudflare' ? 'Reverso: проверка браузера не прошла — откройте страницу кнопкой ниже' : `Reverso не ответил (${error})` });
+      setReverso({ status: 'error', items: [], note: error === 'cloudflare' ? 'проверка браузера не прошла — откройте страницу кнопкой ниже' : `не ответил (${error})` });
       return;
     }
-    setReverso({ status: 'done', items, note: items.length ? undefined : 'в Reverso примеров нет' });
+    setReverso({ status: 'done', items, note: items.length ? undefined : 'примеров нет' });
     void putCachedExamples(db, 'reverso', word.headword, items);
   };
 
